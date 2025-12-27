@@ -94,45 +94,105 @@ export default function Import() {
   const [importing, setImporting] = useState(false);
   const [importResult, setImportResult] = useState<{ total: number; new: number; skipped: number } | null>(null);
 
+  const parseCSVLine = (line: string): string[] => {
+    const result: string[] = [];
+    let inQuotes = false;
+    let currentField = '';
+    
+    for (let i = 0; i < line.length; i++) {
+      const char = line[i];
+      if (char === '"') {
+        inQuotes = !inQuotes;
+      } else if (char === ',' && !inQuotes) {
+        result.push(currentField.trim());
+        currentField = '';
+      } else if (char !== '\r') { // Skip carriage return
+        currentField += char;
+      }
+    }
+    result.push(currentField.trim());
+    return result;
+  };
+
   const handleFileUpload = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const uploadedFile = e.target.files?.[0];
-    if (!uploadedFile) return;
+    if (!uploadedFile) {
+      toast({
+        variant: 'destructive',
+        title: 'No file selected',
+        description: 'Please select a CSV file to upload',
+      });
+      return;
+    }
+
+    // Validate file type
+    if (!uploadedFile.name.toLowerCase().endsWith('.csv') && uploadedFile.type !== 'text/csv') {
+      toast({
+        variant: 'destructive',
+        title: 'Invalid file type',
+        description: 'Please upload a CSV file',
+      });
+      return;
+    }
 
     setFile(uploadedFile);
     
     const reader = new FileReader();
+    reader.onerror = () => {
+      toast({
+        variant: 'destructive',
+        title: 'Failed to read file',
+        description: 'There was an error reading your file. Please try again.',
+      });
+    };
     reader.onload = (event) => {
-      const text = event.target?.result as string;
-      const rows = text.split('\n').map(row => {
-        // Handle quoted CSV fields properly
-        const result: string[] = [];
-        let inQuotes = false;
-        let currentField = '';
-        
-        for (let i = 0; i < row.length; i++) {
-          const char = row[i];
-          if (char === '"') {
-            inQuotes = !inQuotes;
-          } else if (char === ',' && !inQuotes) {
-            result.push(currentField.trim());
-            currentField = '';
-          } else {
-            currentField += char;
-          }
+      try {
+        const text = event.target?.result as string;
+        if (!text || text.trim().length === 0) {
+          toast({
+            variant: 'destructive',
+            title: 'Empty file',
+            description: 'The uploaded file appears to be empty',
+          });
+          return;
         }
-        result.push(currentField.trim());
-        return result;
-      }).filter(row => row.some(cell => cell.length > 0));
 
-      if (rows.length > 0) {
-        setHeaders(rows[0]);
-        setCsvData(rows.slice(1));
+        // Split by newlines (handle both Windows and Unix line endings)
+        const lines = text.split(/\r?\n/).filter(line => line.trim().length > 0);
+        
+        if (lines.length < 2) {
+          toast({
+            variant: 'destructive',
+            title: 'Invalid CSV',
+            description: 'The file must have at least a header row and one data row',
+          });
+          return;
+        }
+
+        const rows = lines.map(parseCSVLine);
+        const headerRow = rows[0];
+        const dataRows = rows.slice(1);
+
+        setHeaders(headerRow);
+        setCsvData(dataRows);
         setMapping(defaultMappings[source]);
         setStep('mapping');
+        
+        toast({
+          title: 'File loaded',
+          description: `Found ${dataRows.length} rows to import`,
+        });
+      } catch (error) {
+        console.error('CSV parsing error:', error);
+        toast({
+          variant: 'destructive',
+          title: 'Failed to parse CSV',
+          description: 'There was an error parsing your file. Please check the format.',
+        });
       }
     };
     reader.readAsText(uploadedFile);
-  }, [source]);
+  }, [source, toast]);
 
   const handleSourceChange = (newSource: ImportSource) => {
     setSource(newSource);
@@ -319,18 +379,18 @@ export default function Import() {
                 </Select>
               </div>
 
-              <div className="border-2 border-dashed border-border rounded-lg p-8 text-center">
+              <div className="border-2 border-dashed border-border rounded-lg p-8 text-center hover:border-primary/50 transition-colors">
                 <input
                   type="file"
-                  accept=".csv"
+                  accept=".csv,text/csv,application/csv,application/vnd.ms-excel"
                   onChange={handleFileUpload}
                   className="hidden"
                   id="csv-upload"
                 />
-                <label htmlFor="csv-upload" className="cursor-pointer">
+                <label htmlFor="csv-upload" className="cursor-pointer block">
                   <Upload className="mx-auto h-12 w-12 text-muted-foreground mb-4" />
-                  <p className="text-lg font-medium">Drop your CSV file here or click to browse</p>
-                  <p className="text-sm text-muted-foreground mt-1">Supports .csv files</p>
+                  <p className="text-lg font-medium">Click to select your CSV file</p>
+                  <p className="text-sm text-muted-foreground mt-1">Supports .csv files from most brokers</p>
                 </label>
               </div>
             </CardContent>
