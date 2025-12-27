@@ -27,6 +27,9 @@ interface ColumnMapping {
   commissions?: string;
   stop_loss?: string;
   notes?: string;
+  mfe?: string;
+  mae?: string;
+  tags?: string;
 }
 
 interface ParsedTrade {
@@ -41,6 +44,8 @@ interface ParsedTrade {
   commissions: number;
   stop_loss: number | null;
   notes: string | null;
+  mfe: number | null;
+  mae: number | null;
   stable_hash: string;
   isDuplicate?: boolean;
 }
@@ -60,13 +65,17 @@ const defaultMappings: Record<ImportSource, ColumnMapping> = {
   TraderVue: {
     symbol: 'Symbol',
     side: 'Side',
-    entry_datetime: 'Entry Time',
-    exit_datetime: 'Exit Time',
+    entry_datetime: 'Open Datetime',
+    exit_datetime: 'Close Datetime',
     entry_price: 'Entry Price',
     exit_price: 'Exit Price',
-    quantity: 'Shares',
-    fees: 'SEC Fees',
+    quantity: 'Volume',
+    fees: 'Fees',
     commissions: 'Commissions',
+    mfe: 'Position MFE',
+    mae: 'Position MAE',
+    notes: 'Notes',
+    tags: 'Tags',
   },
   Custom: {
     symbol: '',
@@ -215,14 +224,18 @@ export default function Import() {
         const qtyIdx = getColIndex(mapping.quantity);
         const feesIdx = mapping.fees ? getColIndex(mapping.fees) : -1;
         const commissionsIdx = mapping.commissions ? getColIndex(mapping.commissions) : -1;
+        const mfeIdx = mapping.mfe ? getColIndex(mapping.mfe) : -1;
+        const maeIdx = mapping.mae ? getColIndex(mapping.mae) : -1;
+        const notesIdx = mapping.notes ? getColIndex(mapping.notes) : -1;
 
         if (symbolIdx === -1 || entryPriceIdx === -1 || qtyIdx === -1) continue;
 
         const symbol = row[symbolIdx]?.toUpperCase();
         if (!symbol) continue;
 
-        const rawSide = row[sideIdx]?.toUpperCase() || 'LONG';
-        const side = rawSide.includes('SHORT') || rawSide.includes('SELL') ? 'SHORT' : 'LONG';
+        const rawSide = row[sideIdx]?.toUpperCase() || 'L';
+        // Handle TraderVue format: 'L' = LONG, 'S' = SHORT
+        const side = (rawSide === 'S' || rawSide.includes('SHORT') || rawSide.includes('SELL')) ? 'SHORT' : 'LONG';
         
         const entryDatetime = row[entryDateIdx] ? new Date(row[entryDateIdx]).toISOString() : new Date().toISOString();
         const exitDatetime = exitDateIdx >= 0 && row[exitDateIdx] ? new Date(row[exitDateIdx]).toISOString() : null;
@@ -232,6 +245,9 @@ export default function Import() {
         const quantity = Math.abs(parseFloat(row[qtyIdx]?.replace(/[,]/g, '') || '0'));
         const fees = feesIdx >= 0 ? parseFloat(row[feesIdx]?.replace(/[$,]/g, '') || '0') : 0;
         const commissions = commissionsIdx >= 0 ? parseFloat(row[commissionsIdx]?.replace(/[$,]/g, '') || '0') : 0;
+        const mfe = mfeIdx >= 0 && row[mfeIdx] ? parseFloat(row[mfeIdx]?.replace(/[$,]/g, '') || '0') : null;
+        const mae = maeIdx >= 0 && row[maeIdx] ? parseFloat(row[maeIdx]?.replace(/[$,]/g, '') || '0') : null;
+        const notes = notesIdx >= 0 && row[notesIdx] ? row[notesIdx] : null;
 
         if (!entryPrice || !quantity) continue;
 
@@ -248,7 +264,9 @@ export default function Import() {
           fees: Math.abs(fees),
           commissions: Math.abs(commissions),
           stop_loss: null,
-          notes: null,
+          notes,
+          mfe,
+          mae,
           stable_hash: stableHash,
         });
       } catch (err) {
@@ -292,6 +310,8 @@ export default function Import() {
           commissions: t.commissions,
           stop_loss: t.stop_loss,
           notes: t.notes,
+          mfe: t.mfe,
+          mae: t.mae,
           stable_hash: t.stable_hash,
           source: source,
         }));
@@ -415,6 +435,9 @@ export default function Import() {
                   quantity: 'Quantity *',
                   fees: 'Fees',
                   commissions: 'Commissions',
+                  mfe: 'MFE (Position)',
+                  mae: 'MAE (Position)',
+                  notes: 'Notes',
                 }).map(([key, label]) => (
                   <div key={key} className="space-y-2">
                     <Label>{label}</Label>
