@@ -242,7 +242,9 @@ export default function Import() {
         
         const entryPrice = parseFloat(row[entryPriceIdx]?.replace(/[$,]/g, '') || '0');
         const exitPrice = exitPriceIdx >= 0 ? parseFloat(row[exitPriceIdx]?.replace(/[$,]/g, '') || '0') : null;
-        const quantity = Math.abs(parseFloat(row[qtyIdx]?.replace(/[,]/g, '') || '0'));
+        // TraderVue reports total volume (entry + exit), so divide by 2 for actual position size
+        const rawQuantity = Math.abs(parseFloat(row[qtyIdx]?.replace(/[,]/g, '') || '0'));
+        const quantity = source === 'TraderVue' ? rawQuantity / 2 : rawQuantity;
         const fees = feesIdx >= 0 ? parseFloat(row[feesIdx]?.replace(/[$,]/g, '') || '0') : 0;
         const commissions = commissionsIdx >= 0 ? parseFloat(row[commissionsIdx]?.replace(/[$,]/g, '') || '0') : 0;
         const mfe = mfeIdx >= 0 && row[mfeIdx] ? parseFloat(row[mfeIdx]?.replace(/[$,]/g, '') || '0') : null;
