@@ -419,16 +419,16 @@ export default function Import() {
                   <div key={key} className="space-y-2">
                     <Label>{label}</Label>
                     <Select 
-                      value={(mapping as any)[key] || ''} 
-                      onValueChange={(v) => setMapping({ ...mapping, [key]: v })}
+                      value={(mapping as any)[key] || '__none__'} 
+                      onValueChange={(v) => setMapping({ ...mapping, [key]: v === '__none__' ? '' : v })}
                     >
                       <SelectTrigger>
                         <SelectValue placeholder="Select column" />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="">-- Not mapped --</SelectItem>
-                        {headers.map((h) => (
-                          <SelectItem key={h} value={h}>{h}</SelectItem>
+                        <SelectItem value="__none__">-- Not mapped --</SelectItem>
+                        {headers.map((h, idx) => (
+                          <SelectItem key={`${h}-${idx}`} value={h}>{h}</SelectItem>
                         ))}
                       </SelectContent>
                     </Select>
