@@ -31,7 +31,30 @@ import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
 import { Trade, TradeSide, Strategy, Account } from '@/types/trade';
 import { calculateTradeMetrics, formatCurrency, formatR } from '@/lib/calculations';
-import { format } from 'date-fns';
+import { format, differenceInMinutes, differenceInHours, differenceInDays } from 'date-fns';
+
+// Format trade duration
+const formatDuration = (entryDate: string, exitDate: string | null): string => {
+  if (!exitDate) return '-';
+  
+  const entry = new Date(entryDate);
+  const exit = new Date(exitDate);
+  const totalMinutes = differenceInMinutes(exit, entry);
+  
+  if (totalMinutes < 1) return '<1m';
+  if (totalMinutes < 60) return `${totalMinutes}m`;
+  
+  const hours = differenceInHours(exit, entry);
+  const mins = totalMinutes % 60;
+  
+  if (hours < 24) {
+    return mins > 0 ? `${hours}h ${mins}m` : `${hours}h`;
+  }
+  
+  const days = differenceInDays(exit, entry);
+  const remainingHours = hours % 24;
+  return remainingHours > 0 ? `${days}d ${remainingHours}h` : `${days}d`;
+};
 
 export default function Trades() {
   const { user } = useAuth();
@@ -195,14 +218,16 @@ export default function Trades() {
                 <Table>
                   <TableHeader>
                     <TableRow className="hover:bg-transparent">
-                      <TableHead className="w-[100px]">Date</TableHead>
+                      <TableHead className="w-[120px]">Date/Time</TableHead>
                       <TableHead>Symbol</TableHead>
                       <TableHead>Side</TableHead>
                       <TableHead className="text-right">Qty</TableHead>
                       <TableHead className="text-right">Entry</TableHead>
                       <TableHead className="text-right">Exit</TableHead>
                       <TableHead className="text-right">Net P/L</TableHead>
+                      <TableHead className="text-right">Risk ($)</TableHead>
                       <TableHead className="text-right">R</TableHead>
+                      <TableHead className="text-center">Duration</TableHead>
                       <TableHead>Strategy</TableHead>
                       <TableHead className="w-[50px]"></TableHead>
                     </TableRow>
@@ -210,10 +235,14 @@ export default function Trades() {
                   <TableBody>
                     {filteredTrades.map((trade) => {
                       const metrics = calculateTradeMetrics(trade);
+                      const duration = formatDuration(trade.entry_datetime, trade.exit_datetime);
                       return (
                         <TableRow key={trade.id} className="group">
                           <TableCell className="font-mono text-sm">
-                            {format(new Date(trade.entry_datetime), 'MM/dd/yy')}
+                            <div>{format(new Date(trade.entry_datetime), 'MM/dd/yy')}</div>
+                            <div className="text-xs text-muted-foreground">
+                              {format(new Date(trade.entry_datetime), 'HH:mm:ss')}
+                            </div>
                           </TableCell>
                           <TableCell>
                             <Link 
@@ -238,8 +267,20 @@ export default function Trades() {
                           <TableCell className="text-right">
                             <PnLBadge value={metrics.netPnL} />
                           </TableCell>
+                          <TableCell className="text-right font-mono text-sm">
+                            {metrics.plannedRisk ? (
+                              <span className="text-muted-foreground">
+                                ${metrics.plannedRisk.toFixed(0)}
+                              </span>
+                            ) : (
+                              <span className="text-muted-foreground/50">-</span>
+                            )}
+                          </TableCell>
                           <TableCell className="text-right">
                             <PnLBadge value={metrics.realizedR || 0} format="r" />
+                          </TableCell>
+                          <TableCell className="text-center font-mono text-sm text-muted-foreground">
+                            {duration}
                           </TableCell>
                           <TableCell className="text-muted-foreground text-sm">
                             {trade.strategy?.name || '-'}
