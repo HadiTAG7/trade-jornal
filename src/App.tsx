@@ -8,6 +8,7 @@ import { ThemeProvider } from "@/contexts/ThemeContext";
 import Auth from "./pages/Auth";
 import Dashboard from "./pages/Dashboard";
 import Trades from "./pages/Trades";
+import TradeDetail from "./pages/TradeDetail";
 import CalendarPage from "./pages/Calendar";
 import Analytics from "./pages/Analytics";
 import Journal from "./pages/Journal";
@@ -43,6 +44,7 @@ function AppRoutes() {
       <Route path="/" element={<Navigate to="/dashboard" replace />} />
       <Route path="/dashboard" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
       <Route path="/trades" element={<ProtectedRoute><Trades /></ProtectedRoute>} />
+      <Route path="/trades/:id" element={<ProtectedRoute><TradeDetail /></ProtectedRoute>} />
       <Route path="/import" element={<ProtectedRoute><Import /></ProtectedRoute>} />
       <Route path="/calendar" element={<ProtectedRoute><CalendarPage /></ProtectedRoute>} />
       <Route path="/analytics" element={<ProtectedRoute><Analytics /></ProtectedRoute>} />
