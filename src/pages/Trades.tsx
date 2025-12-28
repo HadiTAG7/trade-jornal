@@ -1,11 +1,12 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Plus, Filter, Search, ArrowUpDown, MoreHorizontal } from 'lucide-react';
+import { Plus, Filter, Search, ArrowUpDown, MoreHorizontal, Trash2 } from 'lucide-react';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { TradeBadge, PnLBadge } from '@/components/ui/trade-badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Checkbox } from '@/components/ui/checkbox';
 import {
   Table,
   TableBody,
@@ -27,11 +28,22 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
 import { Trade, TradeSide, Strategy, Account } from '@/types/trade';
 import { calculateTradeMetrics, formatCurrency, formatR } from '@/lib/calculations';
 import { format, differenceInMinutes, differenceInHours, differenceInDays } from 'date-fns';
+import { toast } from 'sonner';
 
 // Format trade duration
 const formatDuration = (entryDate: string, exitDate: string | null): string => {
@@ -65,6 +77,9 @@ export default function Trades() {
   const [searchQuery, setSearchQuery] = useState('');
   const [sideFilter, setSideFilter] = useState<string>('all');
   const [strategyFilter, setStrategyFilter] = useState<string>('all');
+  const [selectedTrades, setSelectedTrades] = useState<Set<string>>(new Set());
+  const [showDeleteDialog, setShowDeleteDialog] = useState(false);
+  const [deleting, setDeleting] = useState(false);
 
   useEffect(() => {
     if (user) {
@@ -133,8 +148,60 @@ export default function Trades() {
     const { error } = await supabase.from('trades').delete().eq('id', id);
     if (!error) {
       setTrades(trades.filter(t => t.id !== id));
+      setSelectedTrades(prev => {
+        const next = new Set(prev);
+        next.delete(id);
+        return next;
+      });
     }
   };
+
+  const handleSelectAll = (checked: boolean) => {
+    if (checked) {
+      setSelectedTrades(new Set(filteredTrades.map(t => t.id)));
+    } else {
+      setSelectedTrades(new Set());
+    }
+  };
+
+  const handleSelectTrade = (id: string, checked: boolean) => {
+    setSelectedTrades(prev => {
+      const next = new Set(prev);
+      if (checked) {
+        next.add(id);
+      } else {
+        next.delete(id);
+      }
+      return next;
+    });
+  };
+
+  const handleBulkDelete = async () => {
+    if (selectedTrades.size === 0) return;
+    
+    setDeleting(true);
+    try {
+      const { error } = await supabase
+        .from('trades')
+        .delete()
+        .in('id', Array.from(selectedTrades));
+      
+      if (error) throw error;
+      
+      setTrades(trades.filter(t => !selectedTrades.has(t.id)));
+      toast.success(`Deleted ${selectedTrades.size} trade(s)`);
+      setSelectedTrades(new Set());
+    } catch (error) {
+      console.error('Error deleting trades:', error);
+      toast.error('Failed to delete trades');
+    } finally {
+      setDeleting(false);
+      setShowDeleteDialog(false);
+    }
+  };
+
+  const allSelected = filteredTrades.length > 0 && filteredTrades.every(t => selectedTrades.has(t.id));
+  const someSelected = filteredTrades.some(t => selectedTrades.has(t.id));
 
   return (
     <MainLayout>
@@ -145,14 +212,26 @@ export default function Trades() {
             <h1 className="text-3xl font-bold tracking-tight">Trades</h1>
             <p className="text-muted-foreground">
               {filteredTrades.length} trades
+              {selectedTrades.size > 0 && ` · ${selectedTrades.size} selected`}
             </p>
           </div>
-          <Button asChild>
-            <Link to="/trades/new">
-              <Plus className="mr-2 h-4 w-4" />
-              Add Trade
-            </Link>
-          </Button>
+          <div className="flex gap-2">
+            {selectedTrades.size > 0 && (
+              <Button 
+                variant="destructive" 
+                onClick={() => setShowDeleteDialog(true)}
+              >
+                <Trash2 className="mr-2 h-4 w-4" />
+                Delete ({selectedTrades.size})
+              </Button>
+            )}
+            <Button asChild>
+              <Link to="/trades/new">
+                <Plus className="mr-2 h-4 w-4" />
+                Add Trade
+              </Link>
+            </Button>
+          </div>
         </div>
 
         {/* Filters */}
@@ -218,6 +297,14 @@ export default function Trades() {
                 <Table>
                   <TableHeader>
                     <TableRow className="hover:bg-transparent">
+                      <TableHead className="w-[50px]">
+                        <Checkbox
+                          checked={allSelected}
+                          onCheckedChange={handleSelectAll}
+                          aria-label="Select all"
+                          className={someSelected && !allSelected ? "data-[state=checked]:bg-primary/50" : ""}
+                        />
+                      </TableHead>
                       <TableHead className="w-[120px]">Date/Time</TableHead>
                       <TableHead>Symbol</TableHead>
                       <TableHead>Side</TableHead>
@@ -236,8 +323,19 @@ export default function Trades() {
                     {filteredTrades.map((trade) => {
                       const metrics = calculateTradeMetrics(trade);
                       const duration = formatDuration(trade.entry_datetime, trade.exit_datetime);
+                      const isSelected = selectedTrades.has(trade.id);
                       return (
-                        <TableRow key={trade.id} className="group">
+                        <TableRow 
+                          key={trade.id} 
+                          className={`group ${isSelected ? 'bg-muted/50' : ''}`}
+                        >
+                          <TableCell>
+                            <Checkbox
+                              checked={isSelected}
+                              onCheckedChange={(checked) => handleSelectTrade(trade.id, checked as boolean)}
+                              aria-label={`Select trade ${trade.symbol}`}
+                            />
+                          </TableCell>
                           <TableCell className="font-mono text-sm">
                             <div>{format(new Date(trade.entry_datetime), 'MM/dd/yy')}</div>
                             <div className="text-xs text-muted-foreground">
@@ -315,6 +413,28 @@ export default function Trades() {
           </CardContent>
         </Card>
       </div>
+
+      {/* Bulk Delete Confirmation Dialog */}
+      <AlertDialog open={showDeleteDialog} onOpenChange={setShowDeleteDialog}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete {selectedTrades.size} trade(s)?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This action cannot be undone. This will permanently delete the selected trades.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deleting}>Cancel</AlertDialogCancel>
+            <AlertDialogAction 
+              onClick={handleBulkDelete}
+              disabled={deleting}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              {deleting ? 'Deleting...' : 'Delete'}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </MainLayout>
   );
 }
