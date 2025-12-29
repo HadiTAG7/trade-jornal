@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { useEffect, useState, useCallback } from 'react';
+import { Link, useSearchParams } from 'react-router-dom';
 import { Plus, Filter, Search, MoreHorizontal, Trash2, X, Settings2 } from 'lucide-react';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { TradeBadge, PnLBadge } from '@/components/ui/trade-badge';
@@ -81,15 +81,24 @@ const formatDuration = (entryDate: string, exitDate: string | null): string => {
 
 export default function Trades() {
   const { user } = useAuth();
+  const [searchParams, setSearchParams] = useSearchParams();
+  
+  // Initialize state from URL params
   const [trades, setTrades] = useState<Trade[]>([]);
   const [strategies, setStrategies] = useState<Strategy[]>([]);
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [loading, setLoading] = useState(true);
-  const [searchQuery, setSearchQuery] = useState('');
-  const [sideFilter, setSideFilter] = useState<string>('all');
-  const [strategyFilter, setStrategyFilter] = useState<string>('all');
-  const [dateFrom, setDateFrom] = useState<Date | undefined>(undefined);
-  const [dateTo, setDateTo] = useState<Date | undefined>(undefined);
+  const [searchQuery, setSearchQuery] = useState(searchParams.get('q') || '');
+  const [sideFilter, setSideFilter] = useState<string>(searchParams.get('side') || 'all');
+  const [strategyFilter, setStrategyFilter] = useState<string>(searchParams.get('strategy') || 'all');
+  const [dateFrom, setDateFrom] = useState<Date | undefined>(() => {
+    const param = searchParams.get('from');
+    return param ? new Date(param) : undefined;
+  });
+  const [dateTo, setDateTo] = useState<Date | undefined>(() => {
+    const param = searchParams.get('to');
+    return param ? new Date(param) : undefined;
+  });
   const [selectedTrades, setSelectedTrades] = useState<Set<string>>(new Set());
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -101,6 +110,23 @@ export default function Trades() {
   const [bulkStopLoss, setBulkStopLoss] = useState<string>('');
   const [bulkPlannedRisk, setBulkPlannedRisk] = useState<string>('');
   const [bulkUpdating, setBulkUpdating] = useState(false);
+
+  // Sync filters to URL params
+  const updateUrlParams = useCallback(() => {
+    const params = new URLSearchParams();
+    if (searchQuery) params.set('q', searchQuery);
+    if (sideFilter !== 'all') params.set('side', sideFilter);
+    if (strategyFilter !== 'all') params.set('strategy', strategyFilter);
+    if (dateFrom) params.set('from', format(dateFrom, 'yyyy-MM-dd'));
+    if (dateTo) params.set('to', format(dateTo, 'yyyy-MM-dd'));
+    
+    setSearchParams(params, { replace: true });
+  }, [searchQuery, sideFilter, strategyFilter, dateFrom, dateTo, setSearchParams]);
+
+  // Update URL when filters change
+  useEffect(() => {
+    updateUrlParams();
+  }, [updateUrlParams]);
 
   useEffect(() => {
     if (user) {
@@ -518,6 +544,7 @@ export default function Trades() {
                           <TableCell>
                             <Link 
                               to={`/trades/${trade.id}`}
+                              state={{ from: `?${searchParams.toString()}` }}
                               className="font-medium hover:text-primary transition-colors"
                             >
                               {trade.symbol}
@@ -565,7 +592,7 @@ export default function Trades() {
                               </DropdownMenuTrigger>
                               <DropdownMenuContent align="end">
                                 <DropdownMenuItem asChild>
-                                  <Link to={`/trades/${trade.id}`}>Edit</Link>
+                                  <Link to={`/trades/${trade.id}`} state={{ from: `?${searchParams.toString()}` }}>Edit</Link>
                                 </DropdownMenuItem>
                                 <DropdownMenuItem 
                                   onClick={() => handleDelete(trade.id)}
