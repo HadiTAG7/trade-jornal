@@ -1,6 +1,6 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useMemo } from 'react';
 import { Link } from 'react-router-dom';
-import { Plus, MoreHorizontal, Trash2, Settings2 } from 'lucide-react';
+import { Plus, MoreHorizontal, Trash2, Settings2, ChevronLeft, ChevronRight } from 'lucide-react';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { TradeBadge, PnLBadge } from '@/components/ui/trade-badge';
 import { Button } from '@/components/ui/button';
@@ -99,6 +99,13 @@ export default function Trades() {
   const [bulkStopLoss, setBulkStopLoss] = useState<string>('');
   const [bulkPlannedRisk, setBulkPlannedRisk] = useState<string>('');
   const [bulkUpdating, setBulkUpdating] = useState(false);
+  
+  // Pagination state
+  const [currentPage, setCurrentPage] = useState(1);
+  const [rowsPerPage, setRowsPerPage] = useState(() => {
+    const saved = localStorage.getItem('tradesRowsPerPage');
+    return saved ? parseInt(saved, 10) : 50;
+  });
 
   useEffect(() => {
     if (user) {
@@ -155,6 +162,28 @@ export default function Trades() {
   };
 
   const filteredTrades = filterTrades(trades);
+  
+  // Pagination calculations
+  const totalPages = Math.ceil(filteredTrades.length / rowsPerPage);
+  const paginatedTrades = useMemo(() => {
+    const startIndex = (currentPage - 1) * rowsPerPage;
+    return filteredTrades.slice(startIndex, startIndex + rowsPerPage);
+  }, [filteredTrades, currentPage, rowsPerPage]);
+  
+  // Reset to page 1 when filters change
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [filters]);
+  
+  // Persist rows per page
+  useEffect(() => {
+    localStorage.setItem('tradesRowsPerPage', rowsPerPage.toString());
+  }, [rowsPerPage]);
+  
+  const handleRowsPerPageChange = (value: string) => {
+    setRowsPerPage(parseInt(value, 10));
+    setCurrentPage(1);
+  };
 
   // Bulk update handlers
   const handleBulkStrategyUpdate = async () => {
@@ -238,7 +267,8 @@ export default function Trades() {
 
   const handleSelectAll = (checked: boolean) => {
     if (checked) {
-      setSelectedTrades(new Set(filteredTrades.map(t => t.id)));
+      // Select all on current page
+      setSelectedTrades(new Set(paginatedTrades.map(t => t.id)));
     } else {
       setSelectedTrades(new Set());
     }
@@ -280,8 +310,8 @@ export default function Trades() {
     }
   };
 
-  const allSelected = filteredTrades.length > 0 && filteredTrades.every(t => selectedTrades.has(t.id));
-  const someSelected = filteredTrades.some(t => selectedTrades.has(t.id));
+  const allSelected = paginatedTrades.length > 0 && paginatedTrades.every(t => selectedTrades.has(t.id));
+  const someSelected = paginatedTrades.some(t => selectedTrades.has(t.id));
 
   return (
     <MainLayout>
@@ -380,7 +410,7 @@ export default function Trades() {
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {filteredTrades.map((trade) => {
+                    {paginatedTrades.map((trade) => {
                       const metrics = calculateTradeMetrics(trade);
                       const isSelected = selectedTrades.has(trade.id);
                       return (
@@ -486,6 +516,51 @@ export default function Trades() {
               </div>
             )}
           </CardContent>
+          
+          {/* Pagination Controls */}
+          {filteredTrades.length > 0 && (
+            <div className="flex items-center justify-between border-t px-4 py-3">
+              <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                <span>Rows per page:</span>
+                <Select value={rowsPerPage.toString()} onValueChange={handleRowsPerPageChange}>
+                  <SelectTrigger className="w-[70px] h-8">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="30">30</SelectItem>
+                    <SelectItem value="50">50</SelectItem>
+                    <SelectItem value="100">100</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              
+              <div className="flex items-center gap-4">
+                <span className="text-sm text-muted-foreground">
+                  {(currentPage - 1) * rowsPerPage + 1}–{Math.min(currentPage * rowsPerPage, filteredTrades.length)} of {filteredTrades.length}
+                </span>
+                <div className="flex items-center gap-1">
+                  <Button
+                    variant="outline"
+                    size="icon"
+                    className="h-8 w-8"
+                    onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+                    disabled={currentPage === 1}
+                  >
+                    <ChevronLeft className="h-4 w-4" />
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="icon"
+                    className="h-8 w-8"
+                    onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+                    disabled={currentPage === totalPages}
+                  >
+                    <ChevronRight className="h-4 w-4" />
+                  </Button>
+                </div>
+              </div>
+            </div>
+          )}
         </Card>
       </div>
 
