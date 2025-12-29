@@ -34,8 +34,10 @@ import {
 import { format } from 'date-fns';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Table, TableBody, TableCell, TableRow } from '@/components/ui/table';
+import { DayTimesSection } from '@/components/dashboard/DayTimesSection';
 
 type DashboardView = 'overview' | 'detailed' | 'distribution';
+type DetailedSubView = 'stats' | 'day-times';
 
 // Helper to get trades link with current filters
 const getTradesLink = (searchParams: URLSearchParams) => {
@@ -52,6 +54,7 @@ export default function Dashboard() {
   const [loading, setLoading] = useState(true);
   const [timeGranularity, setTimeGranularity] = useState<'year' | 'month' | 'day'>('year');
   const [dashboardView, setDashboardView] = useState<DashboardView>('overview');
+  const [detailedSubView, setDetailedSubView] = useState<DetailedSubView>('stats');
   
   const { filters, setFilter, setDatePreset, clearDateFilters, filterTrades, hasActiveFilters } = useTradeFilters();
 
@@ -499,192 +502,210 @@ export default function Dashboard() {
 
         {/* Detailed Section */}
         {dashboardView === 'detailed' && (
-          <Card>
-            <CardHeader>
-              <CardTitle>Detailed Statistics</CardTitle>
-              <CardDescription>
-                Comprehensive trading metrics and performance analysis
-                {hasActiveFilters && ` · Based on ${filteredTrades.length} filtered trades`}
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div className="grid gap-0 lg:grid-cols-3 divide-y lg:divide-y-0 lg:divide-x divide-border">
-                {/* Column 1 */}
-                <div className="pr-0 lg:pr-6">
-                  <Table>
-                    <TableBody>
-                      <TableRow>
-                        <TableCell className="text-muted-foreground">Total Gain/Loss</TableCell>
-                        <TableCell className={`text-right font-mono font-medium ${detailedStats.totalGainLoss >= 0 ? 'text-profit' : 'text-loss'}`}>
-                          {formatCurrency(detailedStats.totalGainLoss)}
-                        </TableCell>
-                      </TableRow>
-                      <TableRow>
-                        <TableCell className="text-muted-foreground">Average Daily Gain/Loss</TableCell>
-                        <TableCell className={`text-right font-mono font-medium ${detailedStats.avgDailyGainLoss >= 0 ? 'text-profit' : 'text-loss'}`}>
-                          {formatCurrency(detailedStats.avgDailyGainLoss)}
-                        </TableCell>
-                      </TableRow>
-                      <TableRow>
-                        <TableCell className="text-muted-foreground">Average Trade Gain/Loss</TableCell>
-                        <TableCell className={`text-right font-mono font-medium ${detailedStats.avgTradeGainLoss >= 0 ? 'text-profit' : 'text-loss'}`}>
-                          {formatCurrency(detailedStats.avgTradeGainLoss)}
-                        </TableCell>
-                      </TableRow>
-                      <TableRow>
-                        <TableCell className="text-muted-foreground">Total Number of Trades</TableCell>
-                        <TableCell className="text-right font-mono font-medium">{detailedStats.totalTrades}</TableCell>
-                      </TableRow>
-                      <TableRow>
-                        <TableCell className="text-muted-foreground">Avg Hold Time (scratch trades)</TableCell>
-                        <TableCell className="text-right font-mono font-medium">{formatHoldTime(detailedStats.avgHoldTimeMinutes)}</TableCell>
-                      </TableRow>
-                      <TableRow>
-                        <TableCell className="text-muted-foreground">Number of Scratch Trades</TableCell>
-                        <TableCell className="text-right font-mono font-medium">
-                          {detailedStats.scratchTrades} ({detailedStats.scratchRate.toFixed(1)}%)
-                        </TableCell>
-                      </TableRow>
-                      <TableRow>
-                        <TableCell className="text-muted-foreground">Trade P&L Standard Deviation</TableCell>
-                        <TableCell className="text-right font-mono font-medium">{formatCurrency(detailedStats.tradePnLStdDev)}</TableCell>
-                      </TableRow>
-                      <TableRow>
-                        <TableCell className="text-muted-foreground">Kelly Percentage</TableCell>
-                        <TableCell className={`text-right font-mono font-medium ${detailedStats.kellyPercentage && detailedStats.kellyPercentage < 0 ? 'text-loss' : ''}`}>
-                          {detailedStats.kellyPercentage !== null ? `${detailedStats.kellyPercentage.toFixed(1)}%` : 'n/a'}
-                        </TableCell>
-                      </TableRow>
-                      <TableRow>
-                        <TableCell className="text-muted-foreground">Total Commissions</TableCell>
-                        <TableCell className="text-right font-mono font-medium">{formatCurrency(detailedStats.totalCommissions)}</TableCell>
-                      </TableRow>
-                      <TableRow>
-                        <TableCell className="text-muted-foreground">Average Position MAE</TableCell>
-                        <TableCell className="text-right font-mono font-medium text-loss">
-                          {detailedStats.avgMAE !== null ? formatCurrency(detailedStats.avgMAE) : 'n/a'}
-                        </TableCell>
-                      </TableRow>
-                    </TableBody>
-                  </Table>
-                </div>
+          <div className="space-y-6">
+            {/* Sub-navigation */}
+            <Tabs value={detailedSubView} onValueChange={(v) => setDetailedSubView(v as DetailedSubView)}>
+              <TabsList>
+                <TabsTrigger value="stats">Statistics</TabsTrigger>
+                <TabsTrigger value="day-times">Day / Times</TabsTrigger>
+              </TabsList>
+            </Tabs>
 
-                {/* Column 2 */}
-                <div className="px-0 lg:px-6 pt-4 lg:pt-0">
-                  <Table>
-                    <TableBody>
-                      <TableRow>
-                        <TableCell className="text-muted-foreground">Largest Gain</TableCell>
-                        <TableCell className="text-right font-mono font-medium text-profit">{formatCurrency(detailedStats.largestGain)}</TableCell>
-                      </TableRow>
-                      <TableRow>
-                        <TableCell className="text-muted-foreground">Average Daily Volume</TableCell>
-                        <TableCell className="text-right font-mono font-medium">{Math.round(detailedStats.avgDailyVolume).toLocaleString()}</TableCell>
-                      </TableRow>
-                      <TableRow>
-                        <TableCell className="text-muted-foreground">Average Winning Trade</TableCell>
-                        <TableCell className="text-right font-mono font-medium text-profit">{formatCurrency(detailedStats.avgWinningTrade)}</TableCell>
-                      </TableRow>
-                      <TableRow>
-                        <TableCell className="text-muted-foreground">Number of Winning Trades</TableCell>
-                        <TableCell className="text-right font-mono font-medium text-profit">
-                          {detailedStats.winningTrades} ({detailedStats.winRate.toFixed(1)}%)
-                        </TableCell>
-                      </TableRow>
-                      <TableRow>
-                        <TableCell className="text-muted-foreground">Avg Hold Time (winning trades)</TableCell>
-                        <TableCell className="text-right font-mono font-medium">{formatHoldTime(detailedStats.avgHoldTimeWinningMinutes)}</TableCell>
-                      </TableRow>
-                      <TableRow>
-                        <TableCell className="text-muted-foreground">Max Consecutive Wins</TableCell>
-                        <TableCell className="text-right font-mono font-medium text-profit">{detailedStats.maxConsecutiveWins}</TableCell>
-                      </TableRow>
-                      <TableRow>
-                        <TableCell className="text-muted-foreground">System Quality Number (SQN)</TableCell>
-                        <TableCell className="text-right font-mono font-medium">{detailedStats.sqn !== null ? detailedStats.sqn.toFixed(2) : 'n/a'}</TableCell>
-                      </TableRow>
-                      <TableRow>
-                        <TableCell className="text-muted-foreground">K-Ratio</TableCell>
-                        <TableCell className={`text-right font-mono font-medium ${detailedStats.kRatio && detailedStats.kRatio < 0 ? 'text-loss' : ''}`}>
-                          {detailedStats.kRatio !== null ? detailedStats.kRatio.toFixed(2) : 'n/a'}
-                        </TableCell>
-                      </TableRow>
-                      <TableRow>
-                        <TableCell className="text-muted-foreground">Total Fees</TableCell>
-                        <TableCell className="text-right font-mono font-medium">{formatCurrency(detailedStats.totalFees)}</TableCell>
-                      </TableRow>
-                      <TableRow>
-                        <TableCell className="text-muted-foreground">Average Position MFE</TableCell>
-                        <TableCell className="text-right font-mono font-medium text-profit">
-                          {detailedStats.avgMFE !== null ? formatCurrency(detailedStats.avgMFE) : 'n/a'}
-                        </TableCell>
-                      </TableRow>
-                    </TableBody>
-                  </Table>
-                </div>
+            {/* Stats Sub-section */}
+            {detailedSubView === 'stats' && (
+              <Card>
+                <CardHeader>
+                  <CardTitle>Detailed Statistics</CardTitle>
+                  <CardDescription>
+                    Comprehensive trading metrics and performance analysis
+                    {hasActiveFilters && ` · Based on ${filteredTrades.length} filtered trades`}
+                  </CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <div className="grid gap-0 lg:grid-cols-3 divide-y lg:divide-y-0 lg:divide-x divide-border">
+                    {/* Column 1 */}
+                    <div className="pr-0 lg:pr-6">
+                      <Table>
+                        <TableBody>
+                          <TableRow>
+                            <TableCell className="text-muted-foreground">Total Gain/Loss</TableCell>
+                            <TableCell className={`text-right font-mono font-medium ${detailedStats.totalGainLoss >= 0 ? 'text-profit' : 'text-loss'}`}>
+                              {formatCurrency(detailedStats.totalGainLoss)}
+                            </TableCell>
+                          </TableRow>
+                          <TableRow>
+                            <TableCell className="text-muted-foreground">Average Daily Gain/Loss</TableCell>
+                            <TableCell className={`text-right font-mono font-medium ${detailedStats.avgDailyGainLoss >= 0 ? 'text-profit' : 'text-loss'}`}>
+                              {formatCurrency(detailedStats.avgDailyGainLoss)}
+                            </TableCell>
+                          </TableRow>
+                          <TableRow>
+                            <TableCell className="text-muted-foreground">Average Trade Gain/Loss</TableCell>
+                            <TableCell className={`text-right font-mono font-medium ${detailedStats.avgTradeGainLoss >= 0 ? 'text-profit' : 'text-loss'}`}>
+                              {formatCurrency(detailedStats.avgTradeGainLoss)}
+                            </TableCell>
+                          </TableRow>
+                          <TableRow>
+                            <TableCell className="text-muted-foreground">Total Number of Trades</TableCell>
+                            <TableCell className="text-right font-mono font-medium">{detailedStats.totalTrades}</TableCell>
+                          </TableRow>
+                          <TableRow>
+                            <TableCell className="text-muted-foreground">Avg Hold Time (scratch trades)</TableCell>
+                            <TableCell className="text-right font-mono font-medium">{formatHoldTime(detailedStats.avgHoldTimeMinutes)}</TableCell>
+                          </TableRow>
+                          <TableRow>
+                            <TableCell className="text-muted-foreground">Number of Scratch Trades</TableCell>
+                            <TableCell className="text-right font-mono font-medium">
+                              {detailedStats.scratchTrades} ({detailedStats.scratchRate.toFixed(1)}%)
+                            </TableCell>
+                          </TableRow>
+                          <TableRow>
+                            <TableCell className="text-muted-foreground">Trade P&L Standard Deviation</TableCell>
+                            <TableCell className="text-right font-mono font-medium">{formatCurrency(detailedStats.tradePnLStdDev)}</TableCell>
+                          </TableRow>
+                          <TableRow>
+                            <TableCell className="text-muted-foreground">Kelly Percentage</TableCell>
+                            <TableCell className={`text-right font-mono font-medium ${detailedStats.kellyPercentage && detailedStats.kellyPercentage < 0 ? 'text-loss' : ''}`}>
+                              {detailedStats.kellyPercentage !== null ? `${detailedStats.kellyPercentage.toFixed(1)}%` : 'n/a'}
+                            </TableCell>
+                          </TableRow>
+                          <TableRow>
+                            <TableCell className="text-muted-foreground">Total Commissions</TableCell>
+                            <TableCell className="text-right font-mono font-medium">{formatCurrency(detailedStats.totalCommissions)}</TableCell>
+                          </TableRow>
+                          <TableRow>
+                            <TableCell className="text-muted-foreground">Average Position MAE</TableCell>
+                            <TableCell className="text-right font-mono font-medium text-loss">
+                              {detailedStats.avgMAE !== null ? formatCurrency(detailedStats.avgMAE) : 'n/a'}
+                            </TableCell>
+                          </TableRow>
+                        </TableBody>
+                      </Table>
+                    </div>
 
-                {/* Column 3 */}
-                <div className="pl-0 lg:pl-6 pt-4 lg:pt-0">
-                  <Table>
-                    <TableBody>
-                      <TableRow>
-                        <TableCell className="text-muted-foreground">Largest Loss</TableCell>
-                        <TableCell className="text-right font-mono font-medium text-loss">{formatCurrency(detailedStats.largestLoss)}</TableCell>
-                      </TableRow>
-                      <TableRow>
-                        <TableCell className="text-muted-foreground">Average Per-share Gain/Loss</TableCell>
-                        <TableCell className={`text-right font-mono font-medium ${detailedStats.avgPerShareGainLoss >= 0 ? 'text-profit' : 'text-loss'}`}>
-                          {formatCurrency(detailedStats.avgPerShareGainLoss)}
-                        </TableCell>
-                      </TableRow>
-                      <TableRow>
-                        <TableCell className="text-muted-foreground">Average Losing Trade</TableCell>
-                        <TableCell className="text-right font-mono font-medium text-loss">{formatCurrency(detailedStats.avgLosingTrade)}</TableCell>
-                      </TableRow>
-                      <TableRow>
-                        <TableCell className="text-muted-foreground">Number of Losing Trades</TableCell>
-                        <TableCell className="text-right font-mono font-medium text-loss">
-                          {detailedStats.losingTrades} ({detailedStats.lossRate.toFixed(1)}%)
-                        </TableCell>
-                      </TableRow>
-                      <TableRow>
-                        <TableCell className="text-muted-foreground">Avg Hold Time (losing trades)</TableCell>
-                        <TableCell className="text-right font-mono font-medium">{formatHoldTime(detailedStats.avgHoldTimeLosingMinutes)}</TableCell>
-                      </TableRow>
-                      <TableRow>
-                        <TableCell className="text-muted-foreground">Max Consecutive Losses</TableCell>
-                        <TableCell className="text-right font-mono font-medium text-loss">{detailedStats.maxConsecutiveLosses}</TableCell>
-                      </TableRow>
-                      <TableRow>
-                        <TableCell className="text-muted-foreground">Probability of Random Chance</TableCell>
-                        <TableCell className="text-right font-mono font-medium">
-                          {detailedStats.probabilityOfRandomChance !== null ? `${detailedStats.probabilityOfRandomChance.toFixed(1)}%` : 'n/a'}
-                        </TableCell>
-                      </TableRow>
-                      <TableRow>
-                        <TableCell className="text-muted-foreground">Profit Factor</TableCell>
-                        <TableCell className={`text-right font-mono font-medium ${detailedStats.profitFactor >= 1 ? 'text-profit' : 'text-loss'}`}>
-                          {detailedStats.profitFactor === Infinity ? '∞' : detailedStats.profitFactor.toFixed(2)}
-                        </TableCell>
-                      </TableRow>
-                      <TableRow>
-                        <TableCell className="text-muted-foreground">Total Fees + Commissions</TableCell>
-                        <TableCell className="text-right font-mono font-medium">
-                          {formatCurrency(detailedStats.totalFees + detailedStats.totalCommissions)}
-                        </TableCell>
-                      </TableRow>
-                      <TableRow>
-                        <TableCell className="text-muted-foreground">Expectancy</TableCell>
-                        <TableCell className={`text-right font-mono font-medium ${(analytics?.expectancy || 0) >= 0 ? 'text-profit' : 'text-loss'}`}>
-                          {formatCurrency(analytics?.expectancy || 0)}
-                        </TableCell>
-                      </TableRow>
-                    </TableBody>
-                  </Table>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
+                    {/* Column 2 */}
+                    <div className="px-0 lg:px-6 pt-4 lg:pt-0">
+                      <Table>
+                        <TableBody>
+                          <TableRow>
+                            <TableCell className="text-muted-foreground">Largest Gain</TableCell>
+                            <TableCell className="text-right font-mono font-medium text-profit">{formatCurrency(detailedStats.largestGain)}</TableCell>
+                          </TableRow>
+                          <TableRow>
+                            <TableCell className="text-muted-foreground">Average Daily Volume</TableCell>
+                            <TableCell className="text-right font-mono font-medium">{Math.round(detailedStats.avgDailyVolume).toLocaleString()}</TableCell>
+                          </TableRow>
+                          <TableRow>
+                            <TableCell className="text-muted-foreground">Average Winning Trade</TableCell>
+                            <TableCell className="text-right font-mono font-medium text-profit">{formatCurrency(detailedStats.avgWinningTrade)}</TableCell>
+                          </TableRow>
+                          <TableRow>
+                            <TableCell className="text-muted-foreground">Number of Winning Trades</TableCell>
+                            <TableCell className="text-right font-mono font-medium text-profit">
+                              {detailedStats.winningTrades} ({detailedStats.winRate.toFixed(1)}%)
+                            </TableCell>
+                          </TableRow>
+                          <TableRow>
+                            <TableCell className="text-muted-foreground">Avg Hold Time (winning trades)</TableCell>
+                            <TableCell className="text-right font-mono font-medium">{formatHoldTime(detailedStats.avgHoldTimeWinningMinutes)}</TableCell>
+                          </TableRow>
+                          <TableRow>
+                            <TableCell className="text-muted-foreground">Max Consecutive Wins</TableCell>
+                            <TableCell className="text-right font-mono font-medium text-profit">{detailedStats.maxConsecutiveWins}</TableCell>
+                          </TableRow>
+                          <TableRow>
+                            <TableCell className="text-muted-foreground">System Quality Number (SQN)</TableCell>
+                            <TableCell className="text-right font-mono font-medium">{detailedStats.sqn !== null ? detailedStats.sqn.toFixed(2) : 'n/a'}</TableCell>
+                          </TableRow>
+                          <TableRow>
+                            <TableCell className="text-muted-foreground">K-Ratio</TableCell>
+                            <TableCell className={`text-right font-mono font-medium ${detailedStats.kRatio && detailedStats.kRatio < 0 ? 'text-loss' : ''}`}>
+                              {detailedStats.kRatio !== null ? detailedStats.kRatio.toFixed(2) : 'n/a'}
+                            </TableCell>
+                          </TableRow>
+                          <TableRow>
+                            <TableCell className="text-muted-foreground">Total Fees</TableCell>
+                            <TableCell className="text-right font-mono font-medium">{formatCurrency(detailedStats.totalFees)}</TableCell>
+                          </TableRow>
+                          <TableRow>
+                            <TableCell className="text-muted-foreground">Average Position MFE</TableCell>
+                            <TableCell className="text-right font-mono font-medium text-profit">
+                              {detailedStats.avgMFE !== null ? formatCurrency(detailedStats.avgMFE) : 'n/a'}
+                            </TableCell>
+                          </TableRow>
+                        </TableBody>
+                      </Table>
+                    </div>
+
+                    {/* Column 3 */}
+                    <div className="pl-0 lg:pl-6 pt-4 lg:pt-0">
+                      <Table>
+                        <TableBody>
+                          <TableRow>
+                            <TableCell className="text-muted-foreground">Largest Loss</TableCell>
+                            <TableCell className="text-right font-mono font-medium text-loss">{formatCurrency(detailedStats.largestLoss)}</TableCell>
+                          </TableRow>
+                          <TableRow>
+                            <TableCell className="text-muted-foreground">Average Per-share Gain/Loss</TableCell>
+                            <TableCell className={`text-right font-mono font-medium ${detailedStats.avgPerShareGainLoss >= 0 ? 'text-profit' : 'text-loss'}`}>
+                              {formatCurrency(detailedStats.avgPerShareGainLoss)}
+                            </TableCell>
+                          </TableRow>
+                          <TableRow>
+                            <TableCell className="text-muted-foreground">Average Losing Trade</TableCell>
+                            <TableCell className="text-right font-mono font-medium text-loss">{formatCurrency(detailedStats.avgLosingTrade)}</TableCell>
+                          </TableRow>
+                          <TableRow>
+                            <TableCell className="text-muted-foreground">Number of Losing Trades</TableCell>
+                            <TableCell className="text-right font-mono font-medium text-loss">
+                              {detailedStats.losingTrades} ({detailedStats.lossRate.toFixed(1)}%)
+                            </TableCell>
+                          </TableRow>
+                          <TableRow>
+                            <TableCell className="text-muted-foreground">Avg Hold Time (losing trades)</TableCell>
+                            <TableCell className="text-right font-mono font-medium">{formatHoldTime(detailedStats.avgHoldTimeLosingMinutes)}</TableCell>
+                          </TableRow>
+                          <TableRow>
+                            <TableCell className="text-muted-foreground">Max Consecutive Losses</TableCell>
+                            <TableCell className="text-right font-mono font-medium text-loss">{detailedStats.maxConsecutiveLosses}</TableCell>
+                          </TableRow>
+                          <TableRow>
+                            <TableCell className="text-muted-foreground">Probability of Random Chance</TableCell>
+                            <TableCell className="text-right font-mono font-medium">
+                              {detailedStats.probabilityOfRandomChance !== null ? `${detailedStats.probabilityOfRandomChance.toFixed(1)}%` : 'n/a'}
+                            </TableCell>
+                          </TableRow>
+                          <TableRow>
+                            <TableCell className="text-muted-foreground">Profit Factor</TableCell>
+                            <TableCell className={`text-right font-mono font-medium ${detailedStats.profitFactor >= 1 ? 'text-profit' : 'text-loss'}`}>
+                              {detailedStats.profitFactor === Infinity ? '∞' : detailedStats.profitFactor.toFixed(2)}
+                            </TableCell>
+                          </TableRow>
+                          <TableRow>
+                            <TableCell className="text-muted-foreground">Total Fees + Commissions</TableCell>
+                            <TableCell className="text-right font-mono font-medium">
+                              {formatCurrency(detailedStats.totalFees + detailedStats.totalCommissions)}
+                            </TableCell>
+                          </TableRow>
+                          <TableRow>
+                            <TableCell className="text-muted-foreground">Expectancy</TableCell>
+                            <TableCell className={`text-right font-mono font-medium ${(analytics?.expectancy || 0) >= 0 ? 'text-profit' : 'text-loss'}`}>
+                              {formatCurrency(analytics?.expectancy || 0)}
+                            </TableCell>
+                          </TableRow>
+                        </TableBody>
+                      </Table>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+
+            {/* Day / Times Sub-section */}
+            {detailedSubView === 'day-times' && (
+              <DayTimesSection trades={filteredTrades} />
+            )}
+          </div>
         )}
 
         {/* Distribution Section */}
