@@ -35,9 +35,10 @@ import { format } from 'date-fns';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Table, TableBody, TableCell, TableRow } from '@/components/ui/table';
 import { DayTimesSection } from '@/components/dashboard/DayTimesSection';
+import { PriceVolumeSection } from '@/components/dashboard/PriceVolumeSection';
 
 type DashboardView = 'overview' | 'detailed' | 'distribution';
-type DetailedSubView = 'stats' | 'day-times';
+type DetailedSubView = 'stats' | 'day-times' | 'price-volume';
 
 // Helper to get trades link with current filters
 const getTradesLink = (searchParams: URLSearchParams) => {
@@ -508,6 +509,7 @@ export default function Dashboard() {
               <TabsList>
                 <TabsTrigger value="stats">Statistics</TabsTrigger>
                 <TabsTrigger value="day-times">Day / Times</TabsTrigger>
+                <TabsTrigger value="price-volume">Price / Volume</TabsTrigger>
               </TabsList>
             </Tabs>
 
@@ -704,6 +706,11 @@ export default function Dashboard() {
             {/* Day / Times Sub-section */}
             {detailedSubView === 'day-times' && (
               <DayTimesSection trades={filteredTrades} />
+            )}
+
+            {/* Price / Volume Sub-section */}
+            {detailedSubView === 'price-volume' && (
+              <PriceVolumeSection trades={filteredTrades} />
             )}
           </div>
         )}
