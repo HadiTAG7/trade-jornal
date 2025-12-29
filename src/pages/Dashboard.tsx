@@ -100,7 +100,7 @@ export default function Dashboard() {
     setAnalytics(calculateAnalytics(filteredTrades));
   }, [filteredTrades]);
 
-  // Generate equity curve data from filtered trades
+  // Generate equity curve data from filtered trades (Net P/L)
   const equityCurveData = (() => {
     const closedTrades = filteredTrades.filter(t => t.exit_datetime !== null);
     if (closedTrades.length === 0) return [];
@@ -115,11 +115,70 @@ export default function Dashboard() {
       equity += metrics.netPnL;
       return {
         date: format(new Date(trade.exit_datetime!), 'MMM d'),
+        fullDate: trade.exit_datetime!,
         equity,
         pnl: metrics.netPnL,
       };
     });
   })();
+
+  // Generate Gross Cumulative P/L chart data (uses filters)
+  const grossCumulativePnLData = (() => {
+    const closedTrades = filteredTrades.filter(t => t.exit_datetime !== null);
+    if (closedTrades.length === 0) return [];
+
+    const sorted = [...closedTrades].sort(
+      (a, b) => new Date(a.exit_datetime!).getTime() - new Date(b.exit_datetime!).getTime()
+    );
+
+    // Group by date for cleaner chart
+    const dailyData = new Map<string, { grossPnL: number; date: Date }>();
+    
+    sorted.forEach(trade => {
+      const dateKey = format(new Date(trade.exit_datetime!), 'yyyy-MM-dd');
+      const metrics = calculateTradeMetrics(trade);
+      const existing = dailyData.get(dateKey);
+      if (existing) {
+        existing.grossPnL += metrics.grossPnL;
+      } else {
+        dailyData.set(dateKey, { grossPnL: metrics.grossPnL, date: new Date(trade.exit_datetime!) });
+      }
+    });
+
+    // Convert to cumulative
+    let cumulative = 0;
+    const result: { date: string; cumulative: number; dailyPnL: number }[] = [];
+    
+    Array.from(dailyData.entries())
+      .sort(([a], [b]) => a.localeCompare(b))
+      .forEach(([dateKey, data]) => {
+        cumulative += data.grossPnL;
+        result.push({
+          date: format(data.date, 'yyyy-MM-dd'),
+          cumulative,
+          dailyPnL: data.grossPnL,
+        });
+      });
+
+    return result;
+  })();
+
+  // Determine chart title based on filter state
+  const getGrossChartTitle = () => {
+    if (!hasActiveFilters) {
+      return 'Gross Cumulative P&L (All Time)';
+    }
+    if (filters.dateFrom && filters.dateTo) {
+      return `Gross Cumulative P&L (${format(new Date(filters.dateFrom), 'MMM d, yyyy')} - ${format(new Date(filters.dateTo), 'MMM d, yyyy')})`;
+    }
+    if (filters.dateFrom) {
+      return `Gross Cumulative P&L (From ${format(new Date(filters.dateFrom), 'MMM d, yyyy')})`;
+    }
+    if (filters.dateTo) {
+      return `Gross Cumulative P&L (Until ${format(new Date(filters.dateTo), 'MMM d, yyyy')})`;
+    }
+    return 'Gross Cumulative P&L (Filtered)';
+  };
 
   const recentTrades = filteredTrades.slice(0, 5);
 
@@ -199,11 +258,92 @@ export default function Dashboard() {
 
         {/* Charts & Tables */}
         <div className="grid gap-6 lg:grid-cols-2">
-          {/* Equity Curve */}
+          {/* Gross Cumulative P/L Chart */}
           <Card className="lg:col-span-2">
             <CardHeader>
-              <CardTitle>Equity Curve</CardTitle>
-              <CardDescription>Cumulative P/L over time</CardDescription>
+              <CardTitle>{getGrossChartTitle()}</CardTitle>
+              <CardDescription>
+                {hasActiveFilters 
+                  ? `Showing ${grossCumulativePnLData.length} trading days based on active filters`
+                  : 'Cumulative gross profit/loss across your entire trading history'
+                }
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              {grossCumulativePnLData.length > 0 ? (
+                <div className="h-[300px]">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <AreaChart data={grossCumulativePnLData}>
+                      <defs>
+                        <linearGradient id="colorGrossPnL" x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="5%" stopColor="hsl(var(--profit))" stopOpacity={0.3} />
+                          <stop offset="95%" stopColor="hsl(var(--profit))" stopOpacity={0} />
+                        </linearGradient>
+                      </defs>
+                      <CartesianGrid strokeDasharray="3 3" className="stroke-border/50" />
+                      <XAxis 
+                        dataKey="date" 
+                        className="text-xs fill-muted-foreground"
+                        tickLine={false}
+                        axisLine={false}
+                        interval="preserveStartEnd"
+                        tickFormatter={(value) => {
+                          // Adjust format based on data range
+                          const date = new Date(value);
+                          if (grossCumulativePnLData.length > 90) {
+                            return format(date, 'MMM yyyy');
+                          }
+                          return format(date, 'MMM d');
+                        }}
+                      />
+                      <YAxis 
+                        className="text-xs fill-muted-foreground"
+                        tickLine={false}
+                        axisLine={false}
+                        tickFormatter={(value) => `$${value.toLocaleString()}`}
+                      />
+                      <Tooltip 
+                        contentStyle={{ 
+                          backgroundColor: 'hsl(var(--card))',
+                          borderColor: 'hsl(var(--border))',
+                          borderRadius: '8px',
+                        }}
+                        labelStyle={{ color: 'hsl(var(--foreground))' }}
+                        labelFormatter={(value) => format(new Date(value), 'EEEE, MMM d, yyyy')}
+                        formatter={(value: number, name: string) => [
+                          formatCurrency(value), 
+                          name === 'cumulative' ? 'Cumulative P/L' : 'Daily P/L'
+                        ]}
+                      />
+                      <Area
+                        type="monotone"
+                        dataKey="cumulative"
+                        stroke="hsl(var(--profit))"
+                        strokeWidth={2}
+                        fill="url(#colorGrossPnL)"
+                      />
+                    </AreaChart>
+                  </ResponsiveContainer>
+                </div>
+              ) : (
+                <div className="h-[300px] flex items-center justify-center text-muted-foreground">
+                  <div className="text-center">
+                    <BarChart3 className="mx-auto h-12 w-12 mb-4 opacity-50" />
+                    <p>No trade data for the selected filters</p>
+                    {hasActiveFilters && (
+                      <p className="text-sm mt-1">Try adjusting your filters</p>
+                    )}
+                  </div>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
+          {/* Net Equity Curve */}
+          <Card className="lg:col-span-2">
+            <CardHeader>
+              <CardTitle>Net Equity Curve</CardTitle>
+              <CardDescription>Cumulative net P/L (after fees & commissions)</CardDescription>
             </CardHeader>
             <CardContent>
               {equityCurveData.length > 0 ? (
