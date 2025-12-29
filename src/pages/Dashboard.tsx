@@ -375,16 +375,20 @@ export default function Dashboard() {
                           />
                           <Tooltip 
                             contentStyle={{ 
-                              backgroundColor: 'hsl(var(--card))',
+                              backgroundColor: 'hsl(222 47% 11%)',
                               borderColor: 'hsl(var(--border))',
                               borderRadius: '8px',
+                              boxShadow: '0 10px 25px -5px rgba(0, 0, 0, 0.5)',
                             }}
-                            labelStyle={{ color: 'hsl(var(--foreground))' }}
+                            labelStyle={{ color: 'hsl(0 0% 98%)', fontWeight: 600, marginBottom: '4px' }}
                             labelFormatter={(value) => format(new Date(value), 'EEEE, MMM d, yyyy')}
-                            formatter={(value: number, name: string) => [
-                              formatCurrency(value), 
-                              name === 'cumulative' ? 'Cumulative P/L' : 'Daily P/L'
-                            ]}
+                            formatter={(value: number, name: string) => {
+                              const color = value >= 0 ? 'hsl(142 76% 36%)' : 'hsl(0 84% 60%)';
+                              return [
+                                <span style={{ color, fontWeight: 600 }}>{formatCurrency(value)}</span>, 
+                                name === 'cumulative' ? 'Cumulative P/L' : 'Daily P/L'
+                              ];
+                            }}
                           />
                           <Area
                             type="monotone"
@@ -774,12 +778,16 @@ export default function Dashboard() {
                           />
                           <Tooltip 
                             contentStyle={{ 
-                              backgroundColor: 'hsl(var(--card))',
+                              backgroundColor: 'hsl(222 47% 11%)',
                               borderColor: 'hsl(var(--border))',
                               borderRadius: '8px',
+                              boxShadow: '0 10px 25px -5px rgba(0, 0, 0, 0.5)',
                             }}
-                            labelStyle={{ color: 'hsl(var(--foreground))' }}
-                            formatter={(value: number) => [value, 'Trades']}
+                            labelStyle={{ color: 'hsl(0 0% 98%)', fontWeight: 600, marginBottom: '4px' }}
+                            formatter={(value: number) => [
+                              <span style={{ color: 'hsl(0 0% 98%)', fontWeight: 600 }}>{value}</span>,
+                              'Trades'
+                            ]}
                           />
                           <Bar 
                             dataKey="trades" 
@@ -827,12 +835,19 @@ export default function Dashboard() {
                           />
                           <Tooltip 
                             contentStyle={{ 
-                              backgroundColor: 'hsl(var(--card))',
+                              backgroundColor: 'hsl(222 47% 11%)',
                               borderColor: 'hsl(var(--border))',
                               borderRadius: '8px',
+                              boxShadow: '0 10px 25px -5px rgba(0, 0, 0, 0.5)',
                             }}
-                            labelStyle={{ color: 'hsl(var(--foreground))' }}
-                            formatter={(value: number) => [formatCurrency(value), 'P/L']}
+                            labelStyle={{ color: 'hsl(0 0% 98%)', fontWeight: 600, marginBottom: '4px' }}
+                            formatter={(value: number) => {
+                              const color = value >= 0 ? 'hsl(142 76% 36%)' : 'hsl(0 84% 60%)';
+                              return [
+                                <span style={{ color, fontWeight: 600 }}>{formatCurrency(value)}</span>,
+                                'P/L'
+                              ];
+                            }}
                           />
                           <Bar 
                             dataKey="pnl" 
