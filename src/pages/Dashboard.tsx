@@ -38,8 +38,9 @@ import { DayTimesSection } from '@/components/dashboard/DayTimesSection';
 import { PriceVolumeSection } from '@/components/dashboard/PriceVolumeSection';
 import { InstrumentSection } from '@/components/dashboard/InstrumentSection';
 import { WinLoseExpectationSection } from '@/components/dashboard/WinLoseExpectationSection';
+import { WinLosingDaysSection } from '@/components/dashboard/WinLosingDaysSection';
 
-type DashboardView = 'overview' | 'detailed' | 'distribution';
+type DashboardView = 'overview' | 'detailed' | 'distribution' | 'win-losing-days';
 type DetailedSubView = 'stats' | 'day-times' | 'price-volume' | 'instrument' | 'win-lose-expectation';
 
 // Helper to get trades link with current filters
@@ -291,9 +292,10 @@ export default function Dashboard() {
 
         {/* Dashboard View Tabs */}
         <Tabs value={dashboardView} onValueChange={(v) => setDashboardView(v as DashboardView)} className="w-full">
-          <TabsList className="grid w-full max-w-md grid-cols-3">
+          <TabsList className="grid w-full max-w-xl grid-cols-4">
             <TabsTrigger value="overview">Overview</TabsTrigger>
             <TabsTrigger value="detailed">Detailed</TabsTrigger>
+            <TabsTrigger value="win-losing-days">Win vs Losing Days</TabsTrigger>
             <TabsTrigger value="distribution">Distribution</TabsTrigger>
           </TabsList>
         </Tabs>
@@ -875,6 +877,14 @@ export default function Dashboard() {
               </Card>
             </div>
           </div>
+        )}
+
+        {/* Win vs Losing Days Section */}
+        {dashboardView === 'win-losing-days' && (
+          <WinLosingDaysSection 
+            trades={filteredTrades}
+            onTradeClick={(tradeId) => window.location.href = `/trades/${tradeId}`}
+          />
         )}
       </div>
     </MainLayout>
