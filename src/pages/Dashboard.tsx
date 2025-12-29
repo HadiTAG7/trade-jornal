@@ -37,9 +37,10 @@ import { Table, TableBody, TableCell, TableRow } from '@/components/ui/table';
 import { DayTimesSection } from '@/components/dashboard/DayTimesSection';
 import { PriceVolumeSection } from '@/components/dashboard/PriceVolumeSection';
 import { InstrumentSection } from '@/components/dashboard/InstrumentSection';
+import { WinLoseExpectationSection } from '@/components/dashboard/WinLoseExpectationSection';
 
 type DashboardView = 'overview' | 'detailed' | 'distribution';
-type DetailedSubView = 'stats' | 'day-times' | 'price-volume' | 'instrument';
+type DetailedSubView = 'stats' | 'day-times' | 'price-volume' | 'instrument' | 'win-lose-expectation';
 
 // Helper to get trades link with current filters
 const getTradesLink = (searchParams: URLSearchParams) => {
@@ -512,6 +513,7 @@ export default function Dashboard() {
                 <TabsTrigger value="day-times">Day / Times</TabsTrigger>
                 <TabsTrigger value="price-volume">Price / Volume</TabsTrigger>
                 <TabsTrigger value="instrument">Instrument</TabsTrigger>
+                <TabsTrigger value="win-lose-expectation">Win / Lose / Expectation</TabsTrigger>
               </TabsList>
             </Tabs>
 
@@ -718,6 +720,11 @@ export default function Dashboard() {
             {/* Instrument Sub-section */}
             {detailedSubView === 'instrument' && (
               <InstrumentSection trades={filteredTrades} />
+            )}
+
+            {/* Win / Lose / Expectation Sub-section */}
+            {detailedSubView === 'win-lose-expectation' && (
+              <WinLoseExpectationSection trades={filteredTrades} />
             )}
           </div>
         )}
