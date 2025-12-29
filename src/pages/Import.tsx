@@ -30,6 +30,8 @@ interface ColumnMapping {
   mfe?: string;
   mae?: string;
   tags?: string;
+  gross_pnl?: string;
+  net_pnl?: string;
 }
 
 interface ParsedTrade {
@@ -48,6 +50,7 @@ interface ParsedTrade {
   mae: number | null;
   stable_hash: string;
   isDuplicate?: boolean;
+  calculated_exit_price?: number | null;
 }
 
 const defaultMappings: Record<ImportSource, ColumnMapping> = {
@@ -76,6 +79,8 @@ const defaultMappings: Record<ImportSource, ColumnMapping> = {
     mae: 'Position MAE',
     notes: 'Notes',
     tags: 'Tags',
+    gross_pnl: 'Gross P&L',
+    net_pnl: 'Net P&L',
   },
   Custom: {
     symbol: '',
@@ -227,6 +232,8 @@ export default function Import() {
         const mfeIdx = mapping.mfe ? getColIndex(mapping.mfe) : -1;
         const maeIdx = mapping.mae ? getColIndex(mapping.mae) : -1;
         const notesIdx = mapping.notes ? getColIndex(mapping.notes) : -1;
+        const grossPnlIdx = mapping.gross_pnl ? getColIndex(mapping.gross_pnl) : -1;
+        const netPnlIdx = mapping.net_pnl ? getColIndex(mapping.net_pnl) : -1;
 
         if (symbolIdx === -1 || entryPriceIdx === -1 || qtyIdx === -1) continue;
 
@@ -241,7 +248,8 @@ export default function Import() {
         const exitDatetime = exitDateIdx >= 0 && row[exitDateIdx] ? new Date(row[exitDateIdx]).toISOString() : null;
         
         const entryPrice = parseFloat(row[entryPriceIdx]?.replace(/[$,]/g, '') || '0');
-        const exitPrice = exitPriceIdx >= 0 ? parseFloat(row[exitPriceIdx]?.replace(/[$,]/g, '') || '0') : null;
+        let exitPrice = exitPriceIdx >= 0 && row[exitPriceIdx] ? parseFloat(row[exitPriceIdx]?.replace(/[$,]/g, '') || '0') : null;
+        
         // TraderVue reports total volume (entry + exit), so divide by 2 for actual position size
         const rawQuantity = Math.abs(parseFloat(row[qtyIdx]?.replace(/[,]/g, '') || '0'));
         const quantity = source === 'TraderVue' ? rawQuantity / 2 : rawQuantity;
@@ -250,8 +258,28 @@ export default function Import() {
         const mfe = mfeIdx >= 0 && row[mfeIdx] ? parseFloat(row[mfeIdx]?.replace(/[$,]/g, '') || '0') : null;
         const mae = maeIdx >= 0 && row[maeIdx] ? parseFloat(row[maeIdx]?.replace(/[$,]/g, '') || '0') : null;
         const notes = notesIdx >= 0 && row[notesIdx] ? row[notesIdx] : null;
+        
+        // Parse P/L from TraderVue - prefer Gross P&L for calculating exit price
+        const grossPnl = grossPnlIdx >= 0 && row[grossPnlIdx] ? parseFloat(row[grossPnlIdx]?.replace(/[$,()]/g, '').replace(/^\((.+)\)$/, '-$1') || '0') : null;
+        const netPnl = netPnlIdx >= 0 && row[netPnlIdx] ? parseFloat(row[netPnlIdx]?.replace(/[$,()]/g, '').replace(/^\((.+)\)$/, '-$1') || '0') : null;
 
         if (!entryPrice || !quantity) continue;
+
+        // If we have Gross P/L from TraderVue, calculate the accurate exit price
+        // Gross P/L = (exit_price - entry_price) * quantity for LONG
+        // Gross P/L = (entry_price - exit_price) * quantity for SHORT
+        let calculatedExitPrice: number | null = null;
+        if (source === 'TraderVue' && grossPnl !== null && quantity > 0) {
+          if (side === 'LONG') {
+            // For LONG: grossPnl = (exit - entry) * qty => exit = (grossPnl / qty) + entry
+            calculatedExitPrice = (grossPnl / quantity) + entryPrice;
+          } else {
+            // For SHORT: grossPnl = (entry - exit) * qty => exit = entry - (grossPnl / qty)
+            calculatedExitPrice = entryPrice - (grossPnl / quantity);
+          }
+          // Use calculated exit price if we have Gross P/L
+          exitPrice = calculatedExitPrice;
+        }
 
         const stableHash = generateStableHash(symbol, side, entryDatetime, exitDatetime, entryPrice, exitPrice, quantity, null);
 
@@ -270,6 +298,7 @@ export default function Import() {
           mfe,
           mae,
           stable_hash: stableHash,
+          calculated_exit_price: calculatedExitPrice,
         });
       } catch (err) {
         console.error('Error parsing row:', err, row);
@@ -437,6 +466,8 @@ export default function Import() {
                   quantity: 'Quantity *',
                   fees: 'Fees',
                   commissions: 'Commissions',
+                  gross_pnl: 'Gross P&L',
+                  net_pnl: 'Net P&L',
                   mfe: 'MFE (Position)',
                   mae: 'MAE (Position)',
                   notes: 'Notes',
