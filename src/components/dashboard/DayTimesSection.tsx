@@ -89,15 +89,24 @@ function HorizontalBarChart({
                 {isPerformance && <ReferenceLine x={0} stroke="hsl(var(--border))" />}
                 <Tooltip
                   contentStyle={{
-                    backgroundColor: 'hsl(var(--card))',
+                    backgroundColor: 'hsl(222 47% 11%)',
                     borderColor: 'hsl(var(--border))',
                     borderRadius: '8px',
+                    boxShadow: '0 10px 25px -5px rgba(0, 0, 0, 0.5)',
                   }}
-                  labelStyle={{ color: 'hsl(var(--foreground))' }}
-                  formatter={(value: number) => [
-                    isPerformance ? formatCurrency(value) : value,
-                    isPerformance ? 'P/L' : 'Trades'
-                  ]}
+                  labelStyle={{ color: 'hsl(0 0% 98%)', fontWeight: 600, marginBottom: '4px' }}
+                  itemStyle={{ color: 'hsl(0 0% 90%)' }}
+                  formatter={(value: number, name: string, props: any) => {
+                    const formattedValue = isPerformance ? formatCurrency(value) : value;
+                    const label = isPerformance ? 'P/L' : 'Trades';
+                    const color = isPerformance 
+                      ? value >= 0 ? 'hsl(142 76% 36%)' : 'hsl(0 84% 60%)'
+                      : 'hsl(0 0% 90%)';
+                    return [
+                      <span style={{ color, fontWeight: 600 }}>{formattedValue}</span>,
+                      label
+                    ];
+                  }}
                 />
                 <Bar dataKey={dataKey} radius={[0, 4, 4, 0]}>
                   {data.map((entry, index) => (

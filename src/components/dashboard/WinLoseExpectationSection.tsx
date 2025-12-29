@@ -184,11 +184,16 @@ export function WinLoseExpectationSection({ trades }: WinLoseExpectationSectionP
                     </Pie>
                     <Tooltip
                       contentStyle={{
-                        backgroundColor: 'hsl(var(--card))',
+                        backgroundColor: 'hsl(222 47% 11%)',
                         borderColor: 'hsl(var(--border))',
                         borderRadius: '8px',
+                        boxShadow: '0 10px 25px -5px rgba(0, 0, 0, 0.5)',
                       }}
-                      formatter={(value: number) => [`${value.toFixed(1)}%`, 'Percentage']}
+                      labelStyle={{ color: 'hsl(0 0% 98%)', fontWeight: 600 }}
+                      formatter={(value: number) => [
+                        <span style={{ color: 'hsl(0 0% 98%)', fontWeight: 600 }}>{value.toFixed(1)}%</span>,
+                        'Percentage'
+                      ]}
                     />
                     <Legend 
                       verticalAlign="bottom"
@@ -234,11 +239,20 @@ export function WinLoseExpectationSection({ trades }: WinLoseExpectationSectionP
                     />
                     <Tooltip
                       contentStyle={{
-                        backgroundColor: 'hsl(var(--card))',
+                        backgroundColor: 'hsl(222 47% 11%)',
                         borderColor: 'hsl(var(--border))',
                         borderRadius: '8px',
+                        boxShadow: '0 10px 25px -5px rgba(0, 0, 0, 0.5)',
                       }}
-                      formatter={(value: number) => [formatCurrency(Math.abs(value)), 'P&L']}
+                      labelStyle={{ color: 'hsl(0 0% 98%)', fontWeight: 600, marginBottom: '4px' }}
+                      formatter={(value: number) => {
+                        const isPositive = value >= 0;
+                        const color = isPositive ? 'hsl(142 76% 36%)' : 'hsl(0 84% 60%)';
+                        return [
+                          <span style={{ color, fontWeight: 600 }}>{formatCurrency(Math.abs(value))}</span>,
+                          'P&L'
+                        ];
+                      }}
                     />
                     <Bar dataKey="value" radius={[0, 4, 4, 0]}>
                       {winLossPnLData.map((entry, index) => (
@@ -291,11 +305,19 @@ export function WinLoseExpectationSection({ trades }: WinLoseExpectationSectionP
                     />
                     <Tooltip
                       contentStyle={{
-                        backgroundColor: 'hsl(var(--card))',
+                        backgroundColor: 'hsl(222 47% 11%)',
                         borderColor: 'hsl(var(--border))',
                         borderRadius: '8px',
+                        boxShadow: '0 10px 25px -5px rgba(0, 0, 0, 0.5)',
                       }}
-                      formatter={(value: number) => [formatCurrency(value), 'Expectancy per Trade']}
+                      labelStyle={{ color: 'hsl(0 0% 98%)', fontWeight: 600, marginBottom: '4px' }}
+                      formatter={(value: number) => {
+                        const color = value >= 0 ? 'hsl(142 76% 36%)' : 'hsl(0 84% 60%)';
+                        return [
+                          <span style={{ color, fontWeight: 600 }}>{formatCurrency(value)}</span>,
+                          'Expectancy per Trade'
+                        ];
+                      }}
                     />
                     <Bar dataKey="value" radius={[0, 4, 4, 0]}>
                       {expectationData.map((entry, index) => (
@@ -340,12 +362,20 @@ export function WinLoseExpectationSection({ trades }: WinLoseExpectationSectionP
                     />
                     <Tooltip
                       contentStyle={{
-                        backgroundColor: 'hsl(var(--card))',
+                        backgroundColor: 'hsl(222 47% 11%)',
                         borderColor: 'hsl(var(--border))',
                         borderRadius: '8px',
+                        boxShadow: '0 10px 25px -5px rgba(0, 0, 0, 0.5)',
+                      }}
+                      labelStyle={{ color: 'hsl(0 0% 98%)', fontWeight: 600, marginBottom: '4px' }}
+                      formatter={(value: number) => {
+                        const color = value >= 0 ? 'hsl(142 76% 36%)' : 'hsl(0 84% 60%)';
+                        return [
+                          <span style={{ color, fontWeight: 600 }}>{formatCurrency(value)}</span>,
+                          'Cumulative P&L'
+                        ];
                       }}
                       labelFormatter={(value) => format(new Date(value), 'MMM d, yyyy')}
-                      formatter={(value: number) => [formatCurrency(value), 'Cumulative P&L']}
                     />
                     <Line
                       type="monotone"
@@ -395,14 +425,24 @@ export function WinLoseExpectationSection({ trades }: WinLoseExpectationSectionP
                   />
                   <Tooltip
                     contentStyle={{
-                      backgroundColor: 'hsl(var(--card))',
+                      backgroundColor: 'hsl(222 47% 11%)',
                       borderColor: 'hsl(var(--border))',
                       borderRadius: '8px',
+                      boxShadow: '0 10px 25px -5px rgba(0, 0, 0, 0.5)',
                     }}
+                    labelStyle={{ color: 'hsl(0 0% 98%)', fontWeight: 600, marginBottom: '4px' }}
                     labelFormatter={(value) => format(new Date(value), 'MMM d, yyyy')}
                     formatter={(value: number, name: string) => {
-                      if (name === 'drawdown') return [formatCurrency(value), 'Drawdown'];
-                      return [formatCurrency(value), name];
+                      if (name === 'drawdown') {
+                        return [
+                          <span style={{ color: 'hsl(0 84% 60%)', fontWeight: 600 }}>{formatCurrency(value)}</span>,
+                          'Drawdown'
+                        ];
+                      }
+                      return [
+                        <span style={{ color: 'hsl(0 0% 98%)', fontWeight: 600 }}>{formatCurrency(value)}</span>,
+                        name
+                      ];
                     }}
                   />
                   <Line
