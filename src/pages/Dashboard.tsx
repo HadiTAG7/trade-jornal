@@ -39,9 +39,11 @@ import { PriceVolumeSection } from '@/components/dashboard/PriceVolumeSection';
 import { InstrumentSection } from '@/components/dashboard/InstrumentSection';
 import { WinLoseExpectationSection } from '@/components/dashboard/WinLoseExpectationSection';
 import { WinLosingDaysSection } from '@/components/dashboard/WinLosingDaysSection';
+import { WinLosingDaysTimesSection } from '@/components/dashboard/WinLosingDaysTimesSection';
 
 type DashboardView = 'overview' | 'detailed' | 'distribution' | 'win-losing-days';
 type DetailedSubView = 'stats' | 'day-times' | 'price-volume' | 'instrument' | 'win-lose-expectation';
+type WinLosingDaysSubView = 'stats' | 'days-times';
 
 // Helper to get trades link with current filters
 const getTradesLink = (searchParams: URLSearchParams) => {
@@ -59,6 +61,7 @@ export default function Dashboard() {
   const [timeGranularity, setTimeGranularity] = useState<'year' | 'month' | 'day'>('year');
   const [dashboardView, setDashboardView] = useState<DashboardView>('overview');
   const [detailedSubView, setDetailedSubView] = useState<DetailedSubView>('stats');
+  const [winLosingDaysSubView, setWinLosingDaysSubView] = useState<WinLosingDaysSubView>('stats');
   
   const { filters, setFilter, setDatePreset, clearDateFilters, filterTrades, hasActiveFilters } = useTradeFilters();
 
@@ -881,10 +884,26 @@ export default function Dashboard() {
 
         {/* Win vs Losing Days Section */}
         {dashboardView === 'win-losing-days' && (
-          <WinLosingDaysSection 
-            trades={filteredTrades}
-            onTradeClick={(tradeId) => window.location.href = `/trades/${tradeId}`}
-          />
+          <div className="space-y-6">
+            {/* Sub-section Tabs */}
+            <Tabs value={winLosingDaysSubView} onValueChange={(v) => setWinLosingDaysSubView(v as WinLosingDaysSubView)} className="w-full">
+              <TabsList className="w-full max-w-md grid grid-cols-2">
+                <TabsTrigger value="stats">Stats</TabsTrigger>
+                <TabsTrigger value="days-times">Days / Times</TabsTrigger>
+              </TabsList>
+            </Tabs>
+
+            {winLosingDaysSubView === 'stats' && (
+              <WinLosingDaysSection 
+                trades={filteredTrades}
+                onTradeClick={(tradeId) => window.location.href = `/trades/${tradeId}`}
+              />
+            )}
+
+            {winLosingDaysSubView === 'days-times' && (
+              <WinLosingDaysTimesSection trades={filteredTrades} />
+            )}
+          </div>
         )}
       </div>
     </MainLayout>
