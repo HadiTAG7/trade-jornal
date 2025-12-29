@@ -5,7 +5,6 @@ import {
   TrendingDown, 
   Target, 
   BarChart3, 
-  Calendar,
   ArrowRight,
   Activity
 } from 'lucide-react';
@@ -14,9 +13,11 @@ import { KPICard } from '@/components/ui/kpi-card';
 import { TradeBadge, PnLBadge } from '@/components/ui/trade-badge';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
+import { TradeFiltersComponent } from '@/components/TradeFilters';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
-import { Trade, AnalyticsData } from '@/types/trade';
+import { useTradeFilters } from '@/hooks/useTradeFilters';
+import { Trade, AnalyticsData, Strategy } from '@/types/trade';
 import { calculateAnalytics, calculateTradeMetrics, formatCurrency, formatPercent, formatR } from '@/lib/calculations';
 import { 
   AreaChart, 
@@ -32,12 +33,15 @@ import { format } from 'date-fns';
 export default function Dashboard() {
   const { user } = useAuth();
   const [trades, setTrades] = useState<Trade[]>([]);
+  const [strategies, setStrategies] = useState<Strategy[]>([]);
   const [analytics, setAnalytics] = useState<AnalyticsData | null>(null);
   const [loading, setLoading] = useState(true);
+  
+  const { filters, setFilter, setDatePreset, clearDateFilters, filterTrades, hasActiveFilters } = useTradeFilters();
 
   useEffect(() => {
     if (user) {
-      fetchTrades();
+      Promise.all([fetchTrades(), fetchStrategies()]);
     }
   }, [user]);
 
@@ -45,7 +49,7 @@ export default function Dashboard() {
     try {
       const { data, error } = await supabase
         .from('trades')
-        .select('*')
+        .select('*, strategies(*)')
         .eq('user_id', user?.id)
         .order('entry_datetime', { ascending: false });
 
@@ -63,10 +67,10 @@ export default function Dashboard() {
         planned_r_override: t.planned_r_override ? Number(t.planned_r_override) : null,
         mae: t.mae ? Number(t.mae) : null,
         mfe: t.mfe ? Number(t.mfe) : null,
+        strategy: t.strategies,
       })) as Trade[];
       
       setTrades(typedTrades);
-      setAnalytics(calculateAnalytics(typedTrades));
     } catch (error) {
       console.error('Error fetching trades:', error);
     } finally {
@@ -74,9 +78,24 @@ export default function Dashboard() {
     }
   };
 
-  // Generate equity curve data
+  const fetchStrategies = async () => {
+    const { data } = await supabase
+      .from('strategies')
+      .select('*')
+      .eq('user_id', user?.id);
+    setStrategies(data || []);
+  };
+
+  // Apply filters to trades and recalculate analytics
+  const filteredTrades = filterTrades(trades);
+  
+  useEffect(() => {
+    setAnalytics(calculateAnalytics(filteredTrades));
+  }, [filteredTrades]);
+
+  // Generate equity curve data from filtered trades
   const equityCurveData = (() => {
-    const closedTrades = trades.filter(t => t.exit_datetime !== null);
+    const closedTrades = filteredTrades.filter(t => t.exit_datetime !== null);
     if (closedTrades.length === 0) return [];
 
     const sorted = [...closedTrades].sort(
@@ -95,7 +114,7 @@ export default function Dashboard() {
     });
   })();
 
-  const recentTrades = trades.slice(0, 5);
+  const recentTrades = filteredTrades.slice(0, 5);
 
   if (loading) {
     return (
@@ -114,7 +133,10 @@ export default function Dashboard() {
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
           <div>
             <h1 className="text-3xl font-bold tracking-tight">Dashboard</h1>
-            <p className="text-muted-foreground">Your trading performance at a glance</p>
+            <p className="text-muted-foreground">
+              Your trading performance at a glance
+              {hasActiveFilters && ` · Filtered: ${filteredTrades.length} trades`}
+            </p>
           </div>
           <div className="flex gap-2">
             <Button asChild variant="outline">
@@ -131,6 +153,15 @@ export default function Dashboard() {
             </Button>
           </div>
         </div>
+
+        {/* Filters */}
+        <TradeFiltersComponent
+          filters={filters}
+          strategies={strategies}
+          onFilterChange={setFilter}
+          onDatePreset={setDatePreset}
+          onClearDates={clearDateFilters}
+        />
 
         {/* KPI Cards */}
         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
