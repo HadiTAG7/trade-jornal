@@ -1,12 +1,15 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Plus, Filter, Search, ArrowUpDown, MoreHorizontal, Trash2 } from 'lucide-react';
+import { Plus, Filter, Search, MoreHorizontal, Trash2, CalendarIcon, X, Settings2 } from 'lucide-react';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { TradeBadge, PnLBadge } from '@/components/ui/trade-badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Checkbox } from '@/components/ui/checkbox';
+import { Calendar } from '@/components/ui/calendar';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { Label } from '@/components/ui/label';
 import {
   Table,
   TableBody,
@@ -38,12 +41,21 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
 import { Trade, TradeSide, Strategy, Account } from '@/types/trade';
 import { calculateTradeMetrics, formatCurrency, formatR } from '@/lib/calculations';
-import { format, differenceInMinutes, differenceInHours, differenceInDays } from 'date-fns';
+import { format, differenceInMinutes, differenceInHours, differenceInDays, startOfDay, endOfDay, startOfWeek, startOfMonth, subDays } from 'date-fns';
 import { toast } from 'sonner';
+import { cn } from '@/lib/utils';
 
 // Format trade duration
 const formatDuration = (entryDate: string, exitDate: string | null): string => {
@@ -77,9 +89,19 @@ export default function Trades() {
   const [searchQuery, setSearchQuery] = useState('');
   const [sideFilter, setSideFilter] = useState<string>('all');
   const [strategyFilter, setStrategyFilter] = useState<string>('all');
+  const [dateFrom, setDateFrom] = useState<Date | undefined>(undefined);
+  const [dateTo, setDateTo] = useState<Date | undefined>(undefined);
   const [selectedTrades, setSelectedTrades] = useState<Set<string>>(new Set());
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  
+  // Bulk edit state
+  const [showStrategyDialog, setShowStrategyDialog] = useState(false);
+  const [showRiskDialog, setShowRiskDialog] = useState(false);
+  const [bulkStrategyId, setBulkStrategyId] = useState<string>('');
+  const [bulkStopLoss, setBulkStopLoss] = useState<string>('');
+  const [bulkPlannedRisk, setBulkPlannedRisk] = useState<string>('');
+  const [bulkUpdating, setBulkUpdating] = useState(false);
 
   useEffect(() => {
     if (user) {
@@ -139,8 +161,105 @@ export default function Trades() {
     const matchesSearch = trade.symbol.toLowerCase().includes(searchQuery.toLowerCase());
     const matchesSide = sideFilter === 'all' || trade.side === sideFilter;
     const matchesStrategy = strategyFilter === 'all' || trade.strategy_id === strategyFilter;
-    return matchesSearch && matchesSide && matchesStrategy;
+    
+    // Date filtering
+    const tradeDate = new Date(trade.entry_datetime);
+    const matchesDateFrom = !dateFrom || tradeDate >= startOfDay(dateFrom);
+    const matchesDateTo = !dateTo || tradeDate <= endOfDay(dateTo);
+    
+    return matchesSearch && matchesSide && matchesStrategy && matchesDateFrom && matchesDateTo;
   });
+
+  // Quick date presets
+  const setDatePreset = (preset: 'today' | 'week' | 'month' | 'last30') => {
+    const today = new Date();
+    setDateTo(today);
+    switch (preset) {
+      case 'today':
+        setDateFrom(today);
+        break;
+      case 'week':
+        setDateFrom(startOfWeek(today, { weekStartsOn: 1 }));
+        break;
+      case 'month':
+        setDateFrom(startOfMonth(today));
+        break;
+      case 'last30':
+        setDateFrom(subDays(today, 30));
+        break;
+    }
+  };
+
+  const clearDateFilters = () => {
+    setDateFrom(undefined);
+    setDateTo(undefined);
+  };
+
+  // Bulk update handlers
+  const handleBulkStrategyUpdate = async () => {
+    if (selectedTrades.size === 0 || !bulkStrategyId) return;
+    
+    setBulkUpdating(true);
+    try {
+      const { error } = await supabase
+        .from('trades')
+        .update({ strategy_id: bulkStrategyId === 'none' ? null : bulkStrategyId })
+        .in('id', Array.from(selectedTrades));
+      
+      if (error) throw error;
+      
+      await fetchTrades();
+      toast.success(`Updated strategy for ${selectedTrades.size} trade(s)`);
+      setSelectedTrades(new Set());
+    } catch (error) {
+      console.error('Error updating trades:', error);
+      toast.error('Failed to update trades');
+    } finally {
+      setBulkUpdating(false);
+      setShowStrategyDialog(false);
+      setBulkStrategyId('');
+    }
+  };
+
+  const handleBulkRiskUpdate = async () => {
+    if (selectedTrades.size === 0) return;
+    
+    const updates: { stop_loss?: number | null; planned_risk_override?: number | null } = {};
+    
+    if (bulkStopLoss !== '') {
+      updates.stop_loss = bulkStopLoss ? parseFloat(bulkStopLoss) : null;
+    }
+    if (bulkPlannedRisk !== '') {
+      updates.planned_risk_override = bulkPlannedRisk ? parseFloat(bulkPlannedRisk) : null;
+    }
+    
+    if (Object.keys(updates).length === 0) {
+      toast.error('Please enter at least one value');
+      return;
+    }
+    
+    setBulkUpdating(true);
+    try {
+      const { error } = await supabase
+        .from('trades')
+        .update(updates)
+        .in('id', Array.from(selectedTrades));
+      
+      if (error) throw error;
+      
+      await fetchTrades();
+      toast.success(`Updated risk for ${selectedTrades.size} trade(s)`);
+      setSelectedTrades(new Set());
+    } catch (error) {
+      console.error('Error updating trades:', error);
+      toast.error('Failed to update trades');
+    } finally {
+      setBulkUpdating(false);
+      setShowRiskDialog(false);
+      setBulkStopLoss('');
+      setBulkPlannedRisk('');
+    }
+  };
 
   const handleDelete = async (id: string) => {
     if (!confirm('Are you sure you want to delete this trade?')) return;
@@ -215,15 +334,30 @@ export default function Trades() {
               {selectedTrades.size > 0 && ` · ${selectedTrades.size} selected`}
             </p>
           </div>
-          <div className="flex gap-2">
+          <div className="flex flex-wrap gap-2">
             {selectedTrades.size > 0 && (
-              <Button 
-                variant="destructive" 
-                onClick={() => setShowDeleteDialog(true)}
-              >
-                <Trash2 className="mr-2 h-4 w-4" />
-                Delete ({selectedTrades.size})
-              </Button>
+              <>
+                <Button 
+                  variant="outline" 
+                  onClick={() => setShowStrategyDialog(true)}
+                >
+                  <Settings2 className="mr-2 h-4 w-4" />
+                  Set Strategy
+                </Button>
+                <Button 
+                  variant="outline" 
+                  onClick={() => setShowRiskDialog(true)}
+                >
+                  Set Risk
+                </Button>
+                <Button 
+                  variant="destructive" 
+                  onClick={() => setShowDeleteDialog(true)}
+                >
+                  <Trash2 className="mr-2 h-4 w-4" />
+                  Delete ({selectedTrades.size})
+                </Button>
+              </>
             )}
             <Button asChild>
               <Link to="/trades/new">
@@ -253,6 +387,64 @@ export default function Trades() {
                   className="pl-9"
                 />
               </div>
+              
+              {/* Date From */}
+              <Popover>
+                <PopoverTrigger asChild>
+                  <Button
+                    variant="outline"
+                    className={cn(
+                      "w-[140px] justify-start text-left font-normal",
+                      !dateFrom && "text-muted-foreground"
+                    )}
+                  >
+                    <CalendarIcon className="mr-2 h-4 w-4" />
+                    {dateFrom ? format(dateFrom, "MM/dd/yy") : "From"}
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent className="w-auto p-0" align="start">
+                  <Calendar
+                    mode="single"
+                    selected={dateFrom}
+                    onSelect={setDateFrom}
+                    initialFocus
+                    className="pointer-events-auto"
+                  />
+                </PopoverContent>
+              </Popover>
+
+              {/* Date To */}
+              <Popover>
+                <PopoverTrigger asChild>
+                  <Button
+                    variant="outline"
+                    className={cn(
+                      "w-[140px] justify-start text-left font-normal",
+                      !dateTo && "text-muted-foreground"
+                    )}
+                  >
+                    <CalendarIcon className="mr-2 h-4 w-4" />
+                    {dateTo ? format(dateTo, "MM/dd/yy") : "To"}
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent className="w-auto p-0" align="start">
+                  <Calendar
+                    mode="single"
+                    selected={dateTo}
+                    onSelect={setDateTo}
+                    initialFocus
+                    className="pointer-events-auto"
+                  />
+                </PopoverContent>
+              </Popover>
+
+              {/* Clear date filters */}
+              {(dateFrom || dateTo) && (
+                <Button variant="ghost" size="icon" onClick={clearDateFilters}>
+                  <X className="h-4 w-4" />
+                </Button>
+              )}
+
               <Select value={sideFilter} onValueChange={setSideFilter}>
                 <SelectTrigger className="w-[130px]">
                   <SelectValue placeholder="Side" />
@@ -274,6 +466,22 @@ export default function Trades() {
                   ))}
                 </SelectContent>
               </Select>
+            </div>
+            
+            {/* Quick date presets */}
+            <div className="flex flex-wrap gap-2 mt-3">
+              <Button variant="secondary" size="sm" onClick={() => setDatePreset('today')}>
+                Today
+              </Button>
+              <Button variant="secondary" size="sm" onClick={() => setDatePreset('week')}>
+                This Week
+              </Button>
+              <Button variant="secondary" size="sm" onClick={() => setDatePreset('month')}>
+                This Month
+              </Button>
+              <Button variant="secondary" size="sm" onClick={() => setDatePreset('last30')}>
+                Last 30 Days
+              </Button>
             </div>
           </CardContent>
         </Card>
@@ -435,6 +643,83 @@ export default function Trades() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* Bulk Strategy Update Dialog */}
+      <Dialog open={showStrategyDialog} onOpenChange={setShowStrategyDialog}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Set Strategy for {selectedTrades.size} trade(s)</DialogTitle>
+            <DialogDescription>
+              Choose a strategy to apply to all selected trades.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="py-4">
+            <Select value={bulkStrategyId} onValueChange={setBulkStrategyId}>
+              <SelectTrigger>
+                <SelectValue placeholder="Select a strategy" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="none">No Strategy</SelectItem>
+                {strategies.map((s) => (
+                  <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowStrategyDialog(false)} disabled={bulkUpdating}>
+              Cancel
+            </Button>
+            <Button onClick={handleBulkStrategyUpdate} disabled={bulkUpdating || !bulkStrategyId}>
+              {bulkUpdating ? 'Updating...' : 'Apply'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Bulk Risk Update Dialog */}
+      <Dialog open={showRiskDialog} onOpenChange={setShowRiskDialog}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Set Risk for {selectedTrades.size} trade(s)</DialogTitle>
+            <DialogDescription>
+              Update risk parameters for all selected trades. Leave empty to skip a field.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <Label htmlFor="bulkStopLoss">Stop Loss Price</Label>
+              <Input
+                id="bulkStopLoss"
+                type="number"
+                step="0.01"
+                placeholder="Enter stop loss price"
+                value={bulkStopLoss}
+                onChange={(e) => setBulkStopLoss(e.target.value)}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="bulkPlannedRisk">Planned Risk ($)</Label>
+              <Input
+                id="bulkPlannedRisk"
+                type="number"
+                step="0.01"
+                placeholder="Enter planned risk amount"
+                value={bulkPlannedRisk}
+                onChange={(e) => setBulkPlannedRisk(e.target.value)}
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowRiskDialog(false)} disabled={bulkUpdating}>
+              Cancel
+            </Button>
+            <Button onClick={handleBulkRiskUpdate} disabled={bulkUpdating}>
+              {bulkUpdating ? 'Updating...' : 'Apply'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </MainLayout>
   );
 }
