@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Link, useLocation } from 'react-router-dom';
+import { Link, useLocation, useSearchParams } from 'react-router-dom';
 import { 
   BarChart3, 
   Calendar, 
@@ -27,6 +27,9 @@ import { useAuth } from '@/contexts/AuthContext';
 import { useTheme } from '@/contexts/ThemeContext';
 import { cn } from '@/lib/utils';
 
+// Pages that share filter state
+const filterSyncPages = ['/dashboard', '/trades'];
+
 const navItems = [
   { href: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
   { href: '/trades', label: 'Trades', icon: TrendingUp },
@@ -39,15 +42,29 @@ const navItems = [
 
 export function Header() {
   const location = useLocation();
+  const [searchParams] = useSearchParams();
   const { signOut, user } = useAuth();
   const { theme, toggleTheme } = useTheme();
   const [searchQuery, setSearchQuery] = useState('');
+
+  // Get the href with preserved filter params for synced pages
+  const getNavHref = (href: string) => {
+    const currentPath = location.pathname;
+    const isCurrentPageSynced = filterSyncPages.includes(currentPath);
+    const isTargetPageSynced = filterSyncPages.includes(href);
+    
+    // Only preserve params when navigating between synced pages
+    if (isCurrentPageSynced && isTargetPageSynced && searchParams.toString()) {
+      return `${href}?${searchParams.toString()}`;
+    }
+    return href;
+  };
 
   return (
     <header className="sticky top-0 z-50 w-full border-b border-border bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
       <div className="flex h-14 items-center px-4 lg:px-6">
         {/* Logo */}
-        <Link to="/dashboard" className="flex items-center gap-2 mr-6">
+        <Link to={getNavHref('/dashboard')} className="flex items-center gap-2 mr-6">
           <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary">
             <TrendingUp className="h-5 w-5 text-primary-foreground" />
           </div>
@@ -63,7 +80,7 @@ export function Header() {
             return (
               <Link
                 key={item.href}
-                to={item.href}
+                to={getNavHref(item.href)}
                 className={cn(
                   'nav-item',
                   isActive && 'active'
