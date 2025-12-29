@@ -1,5 +1,5 @@
 import { useEffect, useState, useMemo } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { Plus, MoreHorizontal, Trash2, Settings2, ChevronLeft, ChevronRight } from 'lucide-react';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { TradeBadge, PnLBadge } from '@/components/ui/trade-badge';
@@ -82,7 +82,11 @@ const formatDuration = (entryDate: string, exitDate: string | null): string => {
 
 export default function Trades() {
   const { user } = useAuth();
+  const [searchParams] = useSearchParams();
   const { filters, setFilter, setDatePreset, clearDateFilters, filterTrades } = useTradeFilters();
+  
+  // Build the current search string to pass to trade detail for filter preservation
+  const currentSearchString = searchParams.toString() ? `?${searchParams.toString()}` : '';
   
   const [trades, setTrades] = useState<Trade[]>([]);
   const [strategies, setStrategies] = useState<Strategy[]>([]);
@@ -351,7 +355,7 @@ export default function Trades() {
               </>
             )}
             <Button asChild>
-              <Link to="/trades/new">
+              <Link to="/trades/new" state={{ from: currentSearchString }}>
                 <Plus className="mr-2 h-4 w-4" />
                 Add Trade
               </Link>
@@ -451,6 +455,7 @@ export default function Trades() {
                           <TableCell>
                             <Link 
                               to={`/trades/${trade.id}`}
+                              state={{ from: currentSearchString }}
                               className="font-medium hover:underline"
                             >
                               {trade.symbol}
