@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { useParams, useNavigate, Link } from 'react-router-dom';
+import { useParams, useNavigate, Link, useLocation } from 'react-router-dom';
 import { ArrowLeft, Save, Loader2 } from 'lucide-react';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { Button } from '@/components/ui/button';
@@ -23,8 +23,12 @@ import { format } from 'date-fns';
 export default function TradeDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const location = useLocation();
   const { user } = useAuth();
   const isNew = id === 'new';
+  
+  // Preserve the referrer's search params to restore filters
+  const referrerSearch = location.state?.from || '';
 
   const [loading, setLoading] = useState(!isNew);
   const [saving, setSaving] = useState(false);
@@ -71,7 +75,7 @@ export default function TradeDetail() {
       if (error) throw error;
       if (!data) {
         toast.error('Trade not found');
-        navigate('/trades');
+        navigate(`/trades${referrerSearch}`);
         return;
       }
 
@@ -95,7 +99,7 @@ export default function TradeDetail() {
     } catch (error) {
       console.error('Error fetching trade:', error);
       toast.error('Failed to load trade');
-      navigate('/trades');
+      navigate(`/trades${referrerSearch}`);
     } finally {
       setLoading(false);
     }
@@ -165,7 +169,8 @@ export default function TradeDetail() {
         toast.success('Trade updated');
       }
 
-      navigate('/trades');
+      // Navigate back preserving filters
+      navigate(`/trades${referrerSearch}`);
     } catch (error) {
       console.error('Error saving trade:', error);
       toast.error('Failed to save trade');
@@ -191,7 +196,7 @@ export default function TradeDetail() {
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-4">
             <Button variant="ghost" size="icon" asChild>
-              <Link to="/trades">
+              <Link to={`/trades${referrerSearch}`}>
                 <ArrowLeft className="h-5 w-5" />
               </Link>
             </Button>
