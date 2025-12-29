@@ -22,6 +22,9 @@ import { calculateAnalytics, calculateTradeMetrics, formatCurrency, formatPercen
 import { 
   AreaChart, 
   Area, 
+  BarChart,
+  Bar,
+  Cell,
   XAxis, 
   YAxis, 
   CartesianGrid, 
@@ -29,6 +32,7 @@ import {
   ResponsiveContainer 
 } from 'recharts';
 import { format } from 'date-fns';
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 
 // Helper to get trades link with current filters
 const getTradesLink = (searchParams: URLSearchParams) => {
@@ -43,6 +47,7 @@ export default function Dashboard() {
   const [strategies, setStrategies] = useState<Strategy[]>([]);
   const [analytics, setAnalytics] = useState<AnalyticsData | null>(null);
   const [loading, setLoading] = useState(true);
+  const [timeGranularity, setTimeGranularity] = useState<'year' | 'month' | 'day'>('year');
   
   const { filters, setFilter, setDatePreset, clearDateFilters, filterTrades, hasActiveFilters } = useTradeFilters();
 
@@ -179,6 +184,48 @@ export default function Dashboard() {
     }
     return 'Gross Cumulative P&L (Filtered)';
   };
+
+  // Year/Month/Day distribution and performance data
+  const timeGroupedData = (() => {
+    const closedTrades = filteredTrades.filter(t => t.exit_datetime !== null);
+    if (closedTrades.length === 0) return [];
+
+    const grouped = new Map<string, { trades: number; pnl: number }>();
+
+    closedTrades.forEach(trade => {
+      const exitDate = new Date(trade.exit_datetime!);
+      let key: string;
+      
+      switch (timeGranularity) {
+        case 'year':
+          key = format(exitDate, 'yyyy');
+          break;
+        case 'month':
+          key = format(exitDate, 'yyyy-MM');
+          break;
+        case 'day':
+          key = format(exitDate, 'yyyy-MM-dd');
+          break;
+      }
+
+      const metrics = calculateTradeMetrics(trade);
+      const existing = grouped.get(key);
+      if (existing) {
+        existing.trades += 1;
+        existing.pnl += metrics.grossPnL;
+      } else {
+        grouped.set(key, { trades: 1, pnl: metrics.grossPnL });
+      }
+    });
+
+    return Array.from(grouped.entries())
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([period, data]) => ({
+        period,
+        trades: data.trades,
+        pnl: data.pnl,
+      }));
+  })();
 
   const recentTrades = filteredTrades.slice(0, 5);
 
@@ -491,6 +538,137 @@ export default function Dashboard() {
               </div>
             </CardContent>
           </Card>
+        </div>
+
+        {/* Year / Month / Day Section */}
+        <div className="space-y-4">
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+            <div>
+              <h2 className="text-xl font-semibold">Year / Month / Day</h2>
+              <p className="text-sm text-muted-foreground">Trade distribution and performance by time period</p>
+            </div>
+            <Tabs value={timeGranularity} onValueChange={(v) => setTimeGranularity(v as 'year' | 'month' | 'day')}>
+              <TabsList>
+                <TabsTrigger value="year">Year</TabsTrigger>
+                <TabsTrigger value="month">Month</TabsTrigger>
+                <TabsTrigger value="day">Day</TabsTrigger>
+              </TabsList>
+            </Tabs>
+          </div>
+
+          <div className="grid gap-6 lg:grid-cols-2">
+            {/* Trade Distribution Chart */}
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base">Trade Distribution by {timeGranularity.charAt(0).toUpperCase() + timeGranularity.slice(1)}</CardTitle>
+                <CardDescription>Number of trades per {timeGranularity}</CardDescription>
+              </CardHeader>
+              <CardContent>
+                {timeGroupedData.length > 0 ? (
+                  <div className="h-[250px]">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <BarChart data={timeGroupedData}>
+                        <CartesianGrid strokeDasharray="3 3" className="stroke-border/50" />
+                        <XAxis 
+                          dataKey="period" 
+                          className="text-xs fill-muted-foreground"
+                          tickLine={false}
+                          axisLine={false}
+                          interval="preserveStartEnd"
+                        />
+                        <YAxis 
+                          className="text-xs fill-muted-foreground"
+                          tickLine={false}
+                          axisLine={false}
+                          allowDecimals={false}
+                        />
+                        <Tooltip 
+                          contentStyle={{ 
+                            backgroundColor: 'hsl(var(--card))',
+                            borderColor: 'hsl(var(--border))',
+                            borderRadius: '8px',
+                          }}
+                          labelStyle={{ color: 'hsl(var(--foreground))' }}
+                          formatter={(value: number) => [value, 'Trades']}
+                        />
+                        <Bar 
+                          dataKey="trades" 
+                          fill="hsl(var(--profit))" 
+                          radius={[4, 4, 0, 0]}
+                        />
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </div>
+                ) : (
+                  <div className="h-[250px] flex items-center justify-center text-muted-foreground">
+                    <div className="text-center">
+                      <BarChart3 className="mx-auto h-10 w-10 mb-2 opacity-50" />
+                      <p className="text-sm">No trade data</p>
+                    </div>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+
+            {/* Performance Chart */}
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base">Performance by {timeGranularity.charAt(0).toUpperCase() + timeGranularity.slice(1)}</CardTitle>
+                <CardDescription>Gross P/L per {timeGranularity}</CardDescription>
+              </CardHeader>
+              <CardContent>
+                {timeGroupedData.length > 0 ? (
+                  <div className="h-[250px]">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <BarChart data={timeGroupedData}>
+                        <CartesianGrid strokeDasharray="3 3" className="stroke-border/50" />
+                        <XAxis 
+                          dataKey="period" 
+                          className="text-xs fill-muted-foreground"
+                          tickLine={false}
+                          axisLine={false}
+                          interval="preserveStartEnd"
+                        />
+                        <YAxis 
+                          className="text-xs fill-muted-foreground"
+                          tickLine={false}
+                          axisLine={false}
+                          tickFormatter={(value) => `$${value.toLocaleString()}`}
+                        />
+                        <Tooltip 
+                          contentStyle={{ 
+                            backgroundColor: 'hsl(var(--card))',
+                            borderColor: 'hsl(var(--border))',
+                            borderRadius: '8px',
+                          }}
+                          labelStyle={{ color: 'hsl(var(--foreground))' }}
+                          formatter={(value: number) => [formatCurrency(value), 'P/L']}
+                        />
+                        <Bar 
+                          dataKey="pnl" 
+                          radius={[4, 4, 0, 0]}
+                        >
+                          {timeGroupedData.map((entry, index) => (
+                            <Cell 
+                              key={`cell-${index}`} 
+                              fill={entry.pnl >= 0 ? 'hsl(var(--profit))' : 'hsl(var(--loss))'} 
+                            />
+                          ))}
+                        </Bar>
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </div>
+                ) : (
+                  <div className="h-[250px] flex items-center justify-center text-muted-foreground">
+                    <div className="text-center">
+                      <BarChart3 className="mx-auto h-10 w-10 mb-2 opacity-50" />
+                      <p className="text-sm">No trade data</p>
+                    </div>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          </div>
         </div>
       </div>
     </MainLayout>
