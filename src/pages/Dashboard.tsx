@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { 
   TrendingUp, 
   TrendingDown, 
@@ -30,8 +30,15 @@ import {
 } from 'recharts';
 import { format } from 'date-fns';
 
+// Helper to get trades link with current filters
+const getTradesLink = (searchParams: URLSearchParams) => {
+  const params = searchParams.toString();
+  return params ? `/trades?${params}` : '/trades';
+};
+
 export default function Dashboard() {
   const { user } = useAuth();
+  const [searchParams] = useSearchParams();
   const [trades, setTrades] = useState<Trade[]>([]);
   const [strategies, setStrategies] = useState<Strategy[]>([]);
   const [analytics, setAnalytics] = useState<AnalyticsData | null>(null);
@@ -146,7 +153,7 @@ export default function Dashboard() {
               </Link>
             </Button>
             <Button asChild>
-              <Link to="/trades">
+              <Link to={getTradesLink(searchParams)}>
                 View All Trades
                 <ArrowRight className="ml-2 h-4 w-4" />
               </Link>
@@ -263,7 +270,7 @@ export default function Dashboard() {
                 <CardDescription>Your latest trading activity</CardDescription>
               </div>
               <Button asChild variant="ghost" size="sm">
-                <Link to="/trades">View all</Link>
+                <Link to={getTradesLink(searchParams)}>View all</Link>
               </Button>
             </CardHeader>
             <CardContent>
