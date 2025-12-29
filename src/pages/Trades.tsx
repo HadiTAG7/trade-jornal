@@ -364,14 +364,18 @@ export default function Trades() {
                           aria-label="Select all"
                         />
                       </TableHead>
-                      <TableHead>Symbol</TableHead>
-                      <TableHead>Side</TableHead>
                       <TableHead>Entry</TableHead>
                       <TableHead>Exit</TableHead>
+                      <TableHead>Symbol</TableHead>
+                      <TableHead>Side</TableHead>
+                      <TableHead className="text-right">Volume</TableHead>
+                      <TableHead className="text-right">Entry Price</TableHead>
+                      <TableHead className="text-right">Exit Price</TableHead>
                       <TableHead className="text-right">P/L</TableHead>
-                      <TableHead className="text-right">Risk</TableHead>
-                      <TableHead className="text-right">R</TableHead>
+                      <TableHead className="text-right">P/L (R)</TableHead>
+                      <TableHead className="text-right">Risk ($)</TableHead>
                       <TableHead>Duration</TableHead>
+                      <TableHead>Strategy</TableHead>
                       <TableHead className="w-[50px]"></TableHead>
                     </TableRow>
                   </TableHeader>
@@ -395,17 +399,6 @@ export default function Trades() {
                             />
                           </TableCell>
                           <TableCell>
-                            <Link 
-                              to={`/trades/${trade.id}`}
-                              className="font-medium hover:underline"
-                            >
-                              {trade.symbol}
-                            </Link>
-                          </TableCell>
-                          <TableCell>
-                            <TradeBadge side={trade.side} />
-                          </TableCell>
-                          <TableCell>
                             <div className="text-sm">
                               <div>{format(new Date(trade.entry_datetime), 'MMM d, yyyy')}</div>
                               <div className="text-muted-foreground text-xs">
@@ -425,11 +418,28 @@ export default function Trades() {
                               <span className="text-muted-foreground">Open</span>
                             )}
                           </TableCell>
-                          <TableCell className="text-right">
-                            <PnLBadge value={metrics.netPnL} />
+                          <TableCell>
+                            <Link 
+                              to={`/trades/${trade.id}`}
+                              className="font-medium hover:underline"
+                            >
+                              {trade.symbol}
+                            </Link>
+                          </TableCell>
+                          <TableCell>
+                            <TradeBadge side={trade.side} />
                           </TableCell>
                           <TableCell className="text-right font-mono text-sm">
-                            {metrics.plannedRisk ? formatCurrency(metrics.plannedRisk) : '-'}
+                            {Number(trade.quantity).toLocaleString()}
+                          </TableCell>
+                          <TableCell className="text-right font-mono text-sm">
+                            {formatCurrency(trade.entry_price)}
+                          </TableCell>
+                          <TableCell className="text-right font-mono text-sm">
+                            {trade.exit_price ? formatCurrency(trade.exit_price) : '-'}
+                          </TableCell>
+                          <TableCell className="text-right">
+                            <PnLBadge value={metrics.netPnL} />
                           </TableCell>
                           <TableCell className="text-right">
                             <span className={cn(
@@ -439,8 +449,14 @@ export default function Trades() {
                               {formatR(metrics.realizedR)}
                             </span>
                           </TableCell>
+                          <TableCell className="text-right font-mono text-sm">
+                            {metrics.plannedRisk ? formatCurrency(metrics.plannedRisk) : '-'}
+                          </TableCell>
                           <TableCell className="text-muted-foreground text-sm">
                             {formatDuration(trade.entry_datetime, trade.exit_datetime)}
+                          </TableCell>
+                          <TableCell className="text-sm text-muted-foreground">
+                            {trade.strategy?.name || '-'}
                           </TableCell>
                           <TableCell onClick={(e) => e.stopPropagation()}>
                             <DropdownMenu>
