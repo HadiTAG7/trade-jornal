@@ -40,10 +40,11 @@ import { InstrumentSection } from '@/components/dashboard/InstrumentSection';
 import { WinLoseExpectationSection } from '@/components/dashboard/WinLoseExpectationSection';
 import { WinLosingDaysSection } from '@/components/dashboard/WinLosingDaysSection';
 import { WinLosingDaysTimesSection } from '@/components/dashboard/WinLosingDaysTimesSection';
+import { WinLosingDaysPriceVolumeSection } from '@/components/dashboard/WinLosingDaysPriceVolumeSection';
 
 type DashboardView = 'overview' | 'detailed' | 'distribution' | 'win-losing-days';
 type DetailedSubView = 'stats' | 'day-times' | 'price-volume' | 'instrument' | 'win-lose-expectation';
-type WinLosingDaysSubView = 'stats' | 'days-times';
+type WinLosingDaysSubView = 'stats' | 'days-times' | 'price-volume';
 
 // Helper to get trades link with current filters
 const getTradesLink = (searchParams: URLSearchParams) => {
@@ -887,9 +888,10 @@ export default function Dashboard() {
           <div className="space-y-6">
             {/* Sub-section Tabs */}
             <Tabs value={winLosingDaysSubView} onValueChange={(v) => setWinLosingDaysSubView(v as WinLosingDaysSubView)} className="w-full">
-              <TabsList className="w-full max-w-md grid grid-cols-2">
+              <TabsList className="w-full max-w-lg grid grid-cols-3">
                 <TabsTrigger value="stats">Stats</TabsTrigger>
                 <TabsTrigger value="days-times">Days / Times</TabsTrigger>
+                <TabsTrigger value="price-volume">Price / Volume</TabsTrigger>
               </TabsList>
             </Tabs>
 
@@ -902,6 +904,10 @@ export default function Dashboard() {
 
             {winLosingDaysSubView === 'days-times' && (
               <WinLosingDaysTimesSection trades={filteredTrades} />
+            )}
+
+            {winLosingDaysSubView === 'price-volume' && (
+              <WinLosingDaysPriceVolumeSection trades={filteredTrades} />
             )}
           </div>
         )}
