@@ -1,14 +1,14 @@
-import { useEffect, useState, useCallback } from 'react';
-import { Link, useSearchParams } from 'react-router-dom';
-import { Plus, Filter, Search, MoreHorizontal, Trash2, X, Settings2 } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
+import { Plus, MoreHorizontal, Trash2, Settings2 } from 'lucide-react';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { TradeBadge, PnLBadge } from '@/components/ui/trade-badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardContent } from '@/components/ui/card';
 import { Checkbox } from '@/components/ui/checkbox';
-import { DateInput } from '@/components/ui/date-input';
 import { Label } from '@/components/ui/label';
+import { TradeFiltersComponent } from '@/components/TradeFilters';
 import {
   Table,
   TableBody,
@@ -50,9 +50,10 @@ import {
 } from '@/components/ui/dialog';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
-import { Trade, TradeSide, Strategy, Account } from '@/types/trade';
+import { useTradeFilters } from '@/hooks/useTradeFilters';
+import { Trade, Strategy, Account } from '@/types/trade';
 import { calculateTradeMetrics, formatCurrency, formatR } from '@/lib/calculations';
-import { format, differenceInMinutes, differenceInHours, differenceInDays, startOfDay, endOfDay, startOfWeek, startOfMonth, subDays } from 'date-fns';
+import { format, differenceInMinutes, differenceInHours, differenceInDays } from 'date-fns';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
 
@@ -81,24 +82,12 @@ const formatDuration = (entryDate: string, exitDate: string | null): string => {
 
 export default function Trades() {
   const { user } = useAuth();
-  const [searchParams, setSearchParams] = useSearchParams();
+  const { filters, setFilter, setDatePreset, clearDateFilters, filterTrades } = useTradeFilters();
   
-  // Initialize state from URL params
   const [trades, setTrades] = useState<Trade[]>([]);
   const [strategies, setStrategies] = useState<Strategy[]>([]);
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [loading, setLoading] = useState(true);
-  const [searchQuery, setSearchQuery] = useState(searchParams.get('q') || '');
-  const [sideFilter, setSideFilter] = useState<string>(searchParams.get('side') || 'all');
-  const [strategyFilter, setStrategyFilter] = useState<string>(searchParams.get('strategy') || 'all');
-  const [dateFrom, setDateFrom] = useState<Date | undefined>(() => {
-    const param = searchParams.get('from');
-    return param ? new Date(param) : undefined;
-  });
-  const [dateTo, setDateTo] = useState<Date | undefined>(() => {
-    const param = searchParams.get('to');
-    return param ? new Date(param) : undefined;
-  });
   const [selectedTrades, setSelectedTrades] = useState<Set<string>>(new Set());
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -110,23 +99,6 @@ export default function Trades() {
   const [bulkStopLoss, setBulkStopLoss] = useState<string>('');
   const [bulkPlannedRisk, setBulkPlannedRisk] = useState<string>('');
   const [bulkUpdating, setBulkUpdating] = useState(false);
-
-  // Sync filters to URL params
-  const updateUrlParams = useCallback(() => {
-    const params = new URLSearchParams();
-    if (searchQuery) params.set('q', searchQuery);
-    if (sideFilter !== 'all') params.set('side', sideFilter);
-    if (strategyFilter !== 'all') params.set('strategy', strategyFilter);
-    if (dateFrom) params.set('from', format(dateFrom, 'yyyy-MM-dd'));
-    if (dateTo) params.set('to', format(dateTo, 'yyyy-MM-dd'));
-    
-    setSearchParams(params, { replace: true });
-  }, [searchQuery, sideFilter, strategyFilter, dateFrom, dateTo, setSearchParams]);
-
-  // Update URL when filters change
-  useEffect(() => {
-    updateUrlParams();
-  }, [updateUrlParams]);
 
   useEffect(() => {
     if (user) {
@@ -182,43 +154,7 @@ export default function Trades() {
     setAccounts(data || []);
   };
 
-  const filteredTrades = trades.filter(trade => {
-    const matchesSearch = trade.symbol.toLowerCase().includes(searchQuery.toLowerCase());
-    const matchesSide = sideFilter === 'all' || trade.side === sideFilter;
-    const matchesStrategy = strategyFilter === 'all' || trade.strategy_id === strategyFilter;
-    
-    // Date filtering
-    const tradeDate = new Date(trade.entry_datetime);
-    const matchesDateFrom = !dateFrom || tradeDate >= startOfDay(dateFrom);
-    const matchesDateTo = !dateTo || tradeDate <= endOfDay(dateTo);
-    
-    return matchesSearch && matchesSide && matchesStrategy && matchesDateFrom && matchesDateTo;
-  });
-
-  // Quick date presets
-  const setDatePreset = (preset: 'today' | 'week' | 'month' | 'last30') => {
-    const today = new Date();
-    setDateTo(today);
-    switch (preset) {
-      case 'today':
-        setDateFrom(today);
-        break;
-      case 'week':
-        setDateFrom(startOfWeek(today, { weekStartsOn: 1 }));
-        break;
-      case 'month':
-        setDateFrom(startOfMonth(today));
-        break;
-      case 'last30':
-        setDateFrom(subDays(today, 30));
-        break;
-    }
-  };
-
-  const clearDateFilters = () => {
-    setDateFrom(undefined);
-    setDateTo(undefined);
-  };
+  const filteredTrades = filterTrades(trades);
 
   // Bulk update handlers
   const handleBulkStrategyUpdate = async () => {
@@ -394,88 +330,13 @@ export default function Trades() {
         </div>
 
         {/* Filters */}
-        <Card>
-          <CardHeader className="pb-3">
-            <CardTitle className="text-base font-medium flex items-center gap-2">
-              <Filter className="h-4 w-4" />
-              Filters
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="flex flex-wrap gap-4">
-              <div className="relative flex-1 min-w-[200px]">
-                <Search className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
-                <Input
-                  placeholder="Search by symbol..."
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  className="pl-9"
-                />
-              </div>
-              
-              {/* Date From */}
-              <DateInput
-                value={dateFrom}
-                onChange={setDateFrom}
-                placeholder="From date"
-                className="w-[160px]"
-              />
-
-              {/* Date To */}
-              <DateInput
-                value={dateTo}
-                onChange={setDateTo}
-                placeholder="To date"
-                className="w-[160px]"
-              />
-
-              {/* Clear date filters */}
-              {(dateFrom || dateTo) && (
-                <Button variant="ghost" size="icon" onClick={clearDateFilters}>
-                  <X className="h-4 w-4" />
-                </Button>
-              )}
-
-              <Select value={sideFilter} onValueChange={setSideFilter}>
-                <SelectTrigger className="w-[130px]">
-                  <SelectValue placeholder="Side" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All Sides</SelectItem>
-                  <SelectItem value="LONG">Long</SelectItem>
-                  <SelectItem value="SHORT">Short</SelectItem>
-                </SelectContent>
-              </Select>
-              <Select value={strategyFilter} onValueChange={setStrategyFilter}>
-                <SelectTrigger className="w-[160px]">
-                  <SelectValue placeholder="Strategy" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All Strategies</SelectItem>
-                  {strategies.map((s) => (
-                    <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            
-            {/* Quick date presets */}
-            <div className="flex flex-wrap gap-2 mt-3">
-              <Button variant="secondary" size="sm" onClick={() => setDatePreset('today')}>
-                Today
-              </Button>
-              <Button variant="secondary" size="sm" onClick={() => setDatePreset('week')}>
-                This Week
-              </Button>
-              <Button variant="secondary" size="sm" onClick={() => setDatePreset('month')}>
-                This Month
-              </Button>
-              <Button variant="secondary" size="sm" onClick={() => setDatePreset('last30')}>
-                Last 30 Days
-              </Button>
-            </div>
-          </CardContent>
-        </Card>
+        <TradeFiltersComponent
+          filters={filters}
+          strategies={strategies}
+          onFilterChange={setFilter}
+          onDatePreset={setDatePreset}
+          onClearDates={clearDateFilters}
+        />
 
         {/* Trades Table */}
         <Card>
@@ -497,55 +358,46 @@ export default function Trades() {
                   <TableHeader>
                     <TableRow className="hover:bg-transparent">
                       <TableHead className="w-[50px]">
-                        <Checkbox
+                        <Checkbox 
                           checked={allSelected}
                           onCheckedChange={handleSelectAll}
                           aria-label="Select all"
-                          className={someSelected && !allSelected ? "data-[state=checked]:bg-primary/50" : ""}
                         />
                       </TableHead>
-                      <TableHead className="w-[120px]">Date/Time</TableHead>
                       <TableHead>Symbol</TableHead>
                       <TableHead>Side</TableHead>
-                      <TableHead className="text-right">Qty</TableHead>
-                      <TableHead className="text-right">Entry</TableHead>
-                      <TableHead className="text-right">Exit</TableHead>
-                      <TableHead className="text-right">Net P/L</TableHead>
-                      <TableHead className="text-right">Risk ($)</TableHead>
+                      <TableHead>Entry</TableHead>
+                      <TableHead>Exit</TableHead>
+                      <TableHead className="text-right">P/L</TableHead>
+                      <TableHead className="text-right">Risk</TableHead>
                       <TableHead className="text-right">R</TableHead>
-                      <TableHead className="text-center">Duration</TableHead>
-                      <TableHead>Strategy</TableHead>
+                      <TableHead>Duration</TableHead>
                       <TableHead className="w-[50px]"></TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
                     {filteredTrades.map((trade) => {
                       const metrics = calculateTradeMetrics(trade);
-                      const duration = formatDuration(trade.entry_datetime, trade.exit_datetime);
                       const isSelected = selectedTrades.has(trade.id);
                       return (
                         <TableRow 
                           key={trade.id} 
-                          className={`group ${isSelected ? 'bg-muted/50' : ''}`}
+                          className={cn(
+                            "cursor-pointer",
+                            isSelected && "bg-muted/50"
+                          )}
                         >
-                          <TableCell>
-                            <Checkbox
+                          <TableCell onClick={(e) => e.stopPropagation()}>
+                            <Checkbox 
                               checked={isSelected}
                               onCheckedChange={(checked) => handleSelectTrade(trade.id, checked as boolean)}
                               aria-label={`Select trade ${trade.symbol}`}
                             />
                           </TableCell>
-                          <TableCell className="font-mono text-sm">
-                            <div>{format(new Date(trade.entry_datetime), 'MM/dd/yy')}</div>
-                            <div className="text-xs text-muted-foreground">
-                              {format(new Date(trade.entry_datetime), 'HH:mm:ss')}
-                            </div>
-                          </TableCell>
                           <TableCell>
                             <Link 
                               to={`/trades/${trade.id}`}
-                              state={{ from: `?${searchParams.toString()}` }}
-                              className="font-medium hover:text-primary transition-colors"
+                              className="font-medium hover:underline"
                             >
                               {trade.symbol}
                             </Link>
@@ -553,50 +405,57 @@ export default function Trades() {
                           <TableCell>
                             <TradeBadge side={trade.side} />
                           </TableCell>
-                          <TableCell className="text-right font-mono">
-                            {Number(trade.quantity).toLocaleString()}
+                          <TableCell>
+                            <div className="text-sm">
+                              <div>{format(new Date(trade.entry_datetime), 'MMM d, yyyy')}</div>
+                              <div className="text-muted-foreground text-xs">
+                                {format(new Date(trade.entry_datetime), 'h:mm a')}
+                              </div>
+                            </div>
                           </TableCell>
-                          <TableCell className="text-right font-mono">
-                            ${Number(trade.entry_price).toFixed(2)}
-                          </TableCell>
-                          <TableCell className="text-right font-mono">
-                            {trade.exit_price ? `$${Number(trade.exit_price).toFixed(2)}` : '-'}
+                          <TableCell>
+                            {trade.exit_datetime ? (
+                              <div className="text-sm">
+                                <div>{format(new Date(trade.exit_datetime), 'MMM d, yyyy')}</div>
+                                <div className="text-muted-foreground text-xs">
+                                  {format(new Date(trade.exit_datetime), 'h:mm a')}
+                                </div>
+                              </div>
+                            ) : (
+                              <span className="text-muted-foreground">Open</span>
+                            )}
                           </TableCell>
                           <TableCell className="text-right">
                             <PnLBadge value={metrics.netPnL} />
                           </TableCell>
                           <TableCell className="text-right font-mono text-sm">
-                            {metrics.plannedRisk ? (
-                              <span className="text-muted-foreground">
-                                ${metrics.plannedRisk.toFixed(0)}
-                              </span>
-                            ) : (
-                              <span className="text-muted-foreground/50">-</span>
-                            )}
+                            {metrics.plannedRisk ? formatCurrency(metrics.plannedRisk) : '-'}
                           </TableCell>
                           <TableCell className="text-right">
-                            <PnLBadge value={metrics.realizedR || 0} format="r" />
-                          </TableCell>
-                          <TableCell className="text-center font-mono text-sm text-muted-foreground">
-                            {duration}
+                            <span className={cn(
+                              "font-mono text-sm",
+                              metrics.realizedR && metrics.realizedR >= 0 ? "text-profit" : "text-loss"
+                            )}>
+                              {formatR(metrics.realizedR)}
+                            </span>
                           </TableCell>
                           <TableCell className="text-muted-foreground text-sm">
-                            {trade.strategy?.name || '-'}
+                            {formatDuration(trade.entry_datetime, trade.exit_datetime)}
                           </TableCell>
-                          <TableCell>
+                          <TableCell onClick={(e) => e.stopPropagation()}>
                             <DropdownMenu>
                               <DropdownMenuTrigger asChild>
-                                <Button variant="ghost" size="icon" className="opacity-0 group-hover:opacity-100">
+                                <Button variant="ghost" size="icon" className="h-8 w-8">
                                   <MoreHorizontal className="h-4 w-4" />
                                 </Button>
                               </DropdownMenuTrigger>
                               <DropdownMenuContent align="end">
                                 <DropdownMenuItem asChild>
-                                  <Link to={`/trades/${trade.id}`} state={{ from: `?${searchParams.toString()}` }}>Edit</Link>
+                                  <Link to={`/trades/${trade.id}`}>View Details</Link>
                                 </DropdownMenuItem>
                                 <DropdownMenuItem 
-                                  onClick={() => handleDelete(trade.id)}
                                   className="text-destructive"
+                                  onClick={() => handleDelete(trade.id)}
                                 >
                                   Delete
                                 </DropdownMenuItem>
@@ -614,18 +473,18 @@ export default function Trades() {
         </Card>
       </div>
 
-      {/* Bulk Delete Confirmation Dialog */}
+      {/* Bulk Delete Dialog */}
       <AlertDialog open={showDeleteDialog} onOpenChange={setShowDeleteDialog}>
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>Delete {selectedTrades.size} trade(s)?</AlertDialogTitle>
             <AlertDialogDescription>
-              This action cannot be undone. This will permanently delete the selected trades.
+              This action cannot be undone. All selected trades will be permanently deleted.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel disabled={deleting}>Cancel</AlertDialogCancel>
-            <AlertDialogAction 
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
               onClick={handleBulkDelete}
               disabled={deleting}
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
@@ -636,19 +495,20 @@ export default function Trades() {
         </AlertDialogContent>
       </AlertDialog>
 
-      {/* Bulk Strategy Update Dialog */}
+      {/* Bulk Strategy Dialog */}
       <Dialog open={showStrategyDialog} onOpenChange={setShowStrategyDialog}>
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Set Strategy for {selectedTrades.size} trade(s)</DialogTitle>
             <DialogDescription>
-              Choose a strategy to apply to all selected trades.
+              Apply a strategy to all selected trades
             </DialogDescription>
           </DialogHeader>
           <div className="py-4">
+            <Label>Strategy</Label>
             <Select value={bulkStrategyId} onValueChange={setBulkStrategyId}>
-              <SelectTrigger>
-                <SelectValue placeholder="Select a strategy" />
+              <SelectTrigger className="mt-2">
+                <SelectValue placeholder="Select strategy" />
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="none">No Strategy</SelectItem>
@@ -659,7 +519,7 @@ export default function Trades() {
             </Select>
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setShowStrategyDialog(false)} disabled={bulkUpdating}>
+            <Button variant="outline" onClick={() => setShowStrategyDialog(false)}>
               Cancel
             </Button>
             <Button onClick={handleBulkStrategyUpdate} disabled={bulkUpdating || !bulkStrategyId}>
@@ -669,41 +529,41 @@ export default function Trades() {
         </DialogContent>
       </Dialog>
 
-      {/* Bulk Risk Update Dialog */}
+      {/* Bulk Risk Dialog */}
       <Dialog open={showRiskDialog} onOpenChange={setShowRiskDialog}>
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Set Risk for {selectedTrades.size} trade(s)</DialogTitle>
             <DialogDescription>
-              Update risk parameters for all selected trades. Leave empty to skip a field.
+              Set stop loss and planned risk for all selected trades
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4 py-4">
-            <div className="space-y-2">
-              <Label htmlFor="bulkStopLoss">Stop Loss Price</Label>
+            <div>
+              <Label>Stop Loss Price</Label>
               <Input
-                id="bulkStopLoss"
                 type="number"
                 step="0.01"
-                placeholder="Enter stop loss price"
                 value={bulkStopLoss}
                 onChange={(e) => setBulkStopLoss(e.target.value)}
+                placeholder="Leave empty to keep current"
+                className="mt-2"
               />
             </div>
-            <div className="space-y-2">
-              <Label htmlFor="bulkPlannedRisk">Planned Risk ($)</Label>
+            <div>
+              <Label>Planned Risk ($)</Label>
               <Input
-                id="bulkPlannedRisk"
                 type="number"
                 step="0.01"
-                placeholder="Enter planned risk amount"
                 value={bulkPlannedRisk}
                 onChange={(e) => setBulkPlannedRisk(e.target.value)}
+                placeholder="Leave empty to keep current"
+                className="mt-2"
               />
             </div>
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setShowRiskDialog(false)} disabled={bulkUpdating}>
+            <Button variant="outline" onClick={() => setShowRiskDialog(false)}>
               Cancel
             </Button>
             <Button onClick={handleBulkRiskUpdate} disabled={bulkUpdating}>
