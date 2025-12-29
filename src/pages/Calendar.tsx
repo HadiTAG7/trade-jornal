@@ -7,8 +7,17 @@ import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
 import { Trade, DailyStats } from '@/types/trade';
 import { calculateDailyStats, formatCurrency, formatR } from '@/lib/calculations';
-import { format, startOfMonth, endOfMonth, eachDayOfInterval, addMonths, subMonths, getDay, isSameMonth, isToday, startOfYear, endOfYear, eachMonthOfInterval, isSameDay } from 'date-fns';
+import { format, startOfMonth, endOfMonth, eachDayOfInterval, addMonths, subMonths, getDay, isSameMonth, isToday, startOfYear, endOfYear, eachMonthOfInterval, startOfWeek, endOfWeek } from 'date-fns';
 import { cn } from '@/lib/utils';
+
+// Format P/L compactly for calendar cells
+const formatCompactPnL = (value: number): string => {
+  const sign = value >= 0 ? '+' : '';
+  if (Math.abs(value) >= 1000) {
+    return `${sign}${(value / 1000).toFixed(1)}k`;
+  }
+  return `${sign}${value.toFixed(0)}`;
+};
 
 export default function CalendarPage() {
   const { user } = useAuth();
@@ -56,13 +65,39 @@ export default function CalendarPage() {
     return map;
   }, [dailyStats]);
 
-  const monthDays = useMemo(() => {
-    const start = startOfMonth(currentMonth);
-    const end = endOfMonth(currentMonth);
-    return eachDayOfInterval({ start, end });
+  // Build calendar grid with weeks
+  const calendarWeeks = useMemo(() => {
+    const monthStart = startOfMonth(currentMonth);
+    const monthEnd = endOfMonth(currentMonth);
+    const calStart = startOfWeek(monthStart, { weekStartsOn: 0 });
+    const calEnd = endOfWeek(monthEnd, { weekStartsOn: 0 });
+    const allDays = eachDayOfInterval({ start: calStart, end: calEnd });
+    
+    // Group into weeks
+    const weeks: Date[][] = [];
+    for (let i = 0; i < allDays.length; i += 7) {
+      weeks.push(allDays.slice(i, i + 7));
+    }
+    return weeks;
   }, [currentMonth]);
 
-  const startDayOfWeek = getDay(startOfMonth(currentMonth));
+  // Calculate weekly totals
+  const weeklyTotals = useMemo(() => {
+    return calendarWeeks.map(week => {
+      let total = 0;
+      let hasAnyTrades = false;
+      week.forEach(day => {
+        if (isSameMonth(day, currentMonth)) {
+          const stats = statsMap.get(format(day, 'yyyy-MM-dd'));
+          if (stats) {
+            total += stats.netPnL;
+            hasAnyTrades = true;
+          }
+        }
+      });
+      return { total, hasAnyTrades };
+    });
+  }, [calendarWeeks, statsMap, currentMonth]);
 
   // Get max/min for heatmap intensity
   const { maxPnL, minPnL } = useMemo(() => {
@@ -75,14 +110,15 @@ export default function CalendarPage() {
     if (pnl === 0) return 'bg-muted';
     if (pnl > 0) {
       const intensity = Math.min(pnl / (maxPnL || 1), 1);
-      if (intensity > 0.66) return 'bg-profit/80';
-      if (intensity > 0.33) return 'bg-profit/50';
-      return 'bg-profit/30';
+      if (intensity > 0.66) return 'bg-emerald-500/80 dark:bg-emerald-600/80';
+      if (intensity > 0.33) return 'bg-emerald-500/50 dark:bg-emerald-600/50';
+      return 'bg-emerald-500/30 dark:bg-emerald-600/30';
     } else {
       const intensity = Math.min(Math.abs(pnl) / (Math.abs(minPnL) || 1), 1);
-      if (intensity > 0.66) return 'bg-loss/80';
-      if (intensity > 0.33) return 'bg-loss/50';
-      return 'bg-loss/30';
+      // Use softer red shades for better text readability
+      if (intensity > 0.66) return 'bg-red-400/70 dark:bg-red-500/60';
+      if (intensity > 0.33) return 'bg-red-400/50 dark:bg-red-500/40';
+      return 'bg-red-400/30 dark:bg-red-500/25';
     }
   };
 
@@ -134,61 +170,98 @@ export default function CalendarPage() {
               </div>
             </CardHeader>
             <CardContent>
-              {/* Weekday headers */}
-              <div className="grid grid-cols-7 gap-1 mb-2">
+              {/* Weekday headers + Weekly Total header */}
+              <div className="grid grid-cols-8 gap-1 mb-2">
                 {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map(day => (
                   <div key={day} className="text-center text-xs font-medium text-muted-foreground py-2">
                     {day}
                   </div>
                 ))}
+                <div className="text-center text-xs font-medium text-muted-foreground py-2">
+                  Week
+                </div>
               </div>
 
-              {/* Calendar grid */}
-              <div className="grid grid-cols-7 gap-1">
-                {/* Empty cells for offset */}
-                {Array.from({ length: startDayOfWeek }).map((_, i) => (
-                  <div key={`empty-${i}`} className="aspect-square" />
+              {/* Calendar grid with weeks */}
+              <div className="space-y-1">
+                {calendarWeeks.map((week, weekIndex) => (
+                  <div key={weekIndex} className="grid grid-cols-8 gap-1">
+                    {/* Day cells */}
+                    {week.map(day => {
+                      const dateStr = format(day, 'yyyy-MM-dd');
+                      const stats = statsMap.get(dateStr);
+                      const hasTrades = !!stats;
+                      const isCurrentMonth = isSameMonth(day, currentMonth);
+                      
+                      return (
+                        <button
+                          key={dateStr}
+                          onClick={() => isCurrentMonth && setSelectedDate(dateStr)}
+                          disabled={!isCurrentMonth}
+                          className={cn(
+                            'aspect-square rounded-lg flex flex-col items-center justify-center text-xs transition-all p-0.5',
+                            isCurrentMonth 
+                              ? hasTrades ? getIntensity(stats.netPnL) : 'bg-muted/30'
+                              : 'bg-transparent opacity-30',
+                            isCurrentMonth && isToday(day) && 'ring-2 ring-primary',
+                            isCurrentMonth && selectedDate === dateStr && 'ring-2 ring-primary ring-offset-2 ring-offset-background',
+                            isCurrentMonth && 'hover:ring-2 hover:ring-primary/50'
+                          )}
+                        >
+                          <span className={cn(
+                            'font-semibold text-sm',
+                            hasTrades && stats.netPnL > 0 && 'text-emerald-900 dark:text-emerald-100',
+                            hasTrades && stats.netPnL < 0 && 'text-red-900 dark:text-red-100'
+                          )}>
+                            {format(day, 'd')}
+                          </span>
+                          {hasTrades && isCurrentMonth && (
+                            <span className={cn(
+                              'text-[9px] font-bold font-mono leading-tight',
+                              stats.netPnL >= 0 
+                                ? 'text-emerald-800 dark:text-emerald-200' 
+                                : 'text-red-800 dark:text-red-200'
+                            )}>
+                              {formatCompactPnL(stats.netPnL)}
+                            </span>
+                          )}
+                        </button>
+                      );
+                    })}
+                    
+                    {/* Weekly total cell */}
+                    <div className={cn(
+                      'aspect-square rounded-lg flex flex-col items-center justify-center text-xs font-mono transition-all border-l-2 border-border/50',
+                      weeklyTotals[weekIndex].hasAnyTrades 
+                        ? weeklyTotals[weekIndex].total >= 0 
+                          ? 'bg-emerald-500/20 dark:bg-emerald-600/20' 
+                          : 'bg-red-400/20 dark:bg-red-500/20'
+                        : 'bg-muted/20'
+                    )}>
+                      {weeklyTotals[weekIndex].hasAnyTrades ? (
+                        <>
+                          <span className="text-[9px] text-muted-foreground font-medium">Total</span>
+                          <span className={cn(
+                            'font-bold text-[10px]',
+                            weeklyTotals[weekIndex].total >= 0 
+                              ? 'text-emerald-700 dark:text-emerald-300' 
+                              : 'text-red-700 dark:text-red-300'
+                          )}>
+                            {formatCompactPnL(weeklyTotals[weekIndex].total)}
+                          </span>
+                        </>
+                      ) : (
+                        <span className="text-muted-foreground/50">—</span>
+                      )}
+                    </div>
+                  </div>
                 ))}
-                
-                {/* Day cells */}
-                {monthDays.map(day => {
-                  const dateStr = format(day, 'yyyy-MM-dd');
-                  const stats = statsMap.get(dateStr);
-                  const hasTrades = !!stats;
-                  
-                  return (
-                    <button
-                      key={dateStr}
-                      onClick={() => setSelectedDate(dateStr)}
-                      className={cn(
-                        'aspect-square rounded-lg flex flex-col items-center justify-center text-sm transition-all p-1',
-                        hasTrades ? getIntensity(stats.netPnL) : 'bg-muted/30',
-                        isToday(day) && 'ring-2 ring-primary',
-                        selectedDate === dateStr && 'ring-2 ring-primary ring-offset-2 ring-offset-background',
-                        'hover:ring-2 hover:ring-primary/50'
-                      )}
-                    >
-                      <span className={cn(
-                        'font-medium',
-                        hasTrades && stats.netPnL > 0 && 'text-profit-foreground',
-                        hasTrades && stats.netPnL < 0 && 'text-loss-foreground'
-                      )}>
-                        {format(day, 'd')}
-                      </span>
-                      {hasTrades && (
-                        <span className="text-[10px] font-mono mt-0.5 opacity-90">
-                          {stats.trades}
-                        </span>
-                      )}
-                    </button>
-                  );
-                })}
               </div>
 
               {/* Legend */}
               <div className="flex items-center justify-center gap-4 mt-6 text-xs text-muted-foreground">
                 <div className="flex items-center gap-1">
-                  <div className="w-3 h-3 rounded bg-loss/50" />
+                  <div className="w-3 h-3 rounded bg-red-400/50 dark:bg-red-500/40" />
                   <span>Loss</span>
                 </div>
                 <div className="flex items-center gap-1">
@@ -196,7 +269,7 @@ export default function CalendarPage() {
                   <span>No trades</span>
                 </div>
                 <div className="flex items-center gap-1">
-                  <div className="w-3 h-3 rounded bg-profit/50" />
+                  <div className="w-3 h-3 rounded bg-emerald-500/50 dark:bg-emerald-600/50" />
                   <span>Profit</span>
                 </div>
               </div>
@@ -299,10 +372,14 @@ export default function CalendarPage() {
                       isSameMonth(month, currentMonth) && 'ring-2 ring-primary'
                     )}
                   >
-                    <p className="text-xs font-medium">{format(month, 'MMM')}</p>
                     <p className={cn(
-                      'text-xs font-mono mt-1',
-                      monthStats >= 0 ? 'text-profit' : 'text-loss'
+                      'text-xs font-semibold',
+                      monthStats > 0 && 'text-emerald-900 dark:text-emerald-100',
+                      monthStats < 0 && 'text-red-900 dark:text-red-100'
+                    )}>{format(month, 'MMM')}</p>
+                    <p className={cn(
+                      'text-xs font-mono font-bold mt-1',
+                      monthStats >= 0 ? 'text-emerald-700 dark:text-emerald-300' : 'text-red-700 dark:text-red-300'
                     )}>
                       {monthStats !== 0 ? formatCurrency(monthStats) : '-'}
                     </p>
