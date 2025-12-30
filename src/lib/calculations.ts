@@ -48,6 +48,7 @@ export function calculateAnalytics(trades: Trade[]): AnalyticsData {
   if (trades.length === 0) {
     return {
       totalNetPnL: 0,
+      totalR: 0,
       totalTrades: 0,
       winRate: 0,
       avgR: 0,
@@ -70,11 +71,10 @@ export function calculateAnalytics(trades: Trade[]): AnalyticsData {
   const totalNetPnL = metricsArray.reduce((sum, m) => sum + m.netPnL, 0);
   const winRate = closedTrades.length > 0 ? (wins.length / closedTrades.length) * 100 : 0;
 
-  // Calculate average R (only for trades with R calculated)
+  // Calculate average R and total R (only for trades with R calculated)
   const tradesWithR = metricsArray.filter(m => m.realizedR !== null);
-  const avgR = tradesWithR.length > 0
-    ? tradesWithR.reduce((sum, m) => sum + (m.realizedR || 0), 0) / tradesWithR.length
-    : 0;
+  const totalR = tradesWithR.reduce((sum, m) => sum + (m.realizedR || 0), 0);
+  const avgR = tradesWithR.length > 0 ? totalR / tradesWithR.length : 0;
 
   // Expectancy: (Win Rate * Avg Win) - (Loss Rate * Avg Loss)
   const avgWin = wins.length > 0 ? wins.reduce((sum, m) => sum + m.netPnL, 0) / wins.length : 0;
@@ -141,6 +141,7 @@ export function calculateAnalytics(trades: Trade[]): AnalyticsData {
 
   return {
     totalNetPnL,
+    totalR,
     totalTrades: closedTrades.length,
     winRate,
     avgR,

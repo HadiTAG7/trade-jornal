@@ -7,7 +7,9 @@ import {
   BarChart3, 
   ArrowRight,
   Activity,
-  Download
+  Download,
+  DollarSign,
+  Percent
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { MainLayout } from '@/components/layout/MainLayout';
@@ -36,6 +38,7 @@ import {
 import { format } from 'date-fns';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Table, TableBody, TableCell, TableRow } from '@/components/ui/table';
+import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 import { DayTimesSection } from '@/components/dashboard/DayTimesSection';
 import { PriceVolumeSection } from '@/components/dashboard/PriceVolumeSection';
 import { InstrumentSection } from '@/components/dashboard/InstrumentSection';
@@ -47,6 +50,7 @@ import { WinLosingDaysPriceVolumeSection } from '@/components/dashboard/WinLosin
 type DashboardView = 'overview' | 'detailed' | 'distribution' | 'win-losing-days';
 type DetailedSubView = 'stats' | 'day-times' | 'price-volume' | 'instrument' | 'win-lose-expectation';
 type WinLosingDaysSubView = 'stats' | 'days-times' | 'price-volume';
+type DisplayMode = 'dollars' | 'R';
 
 // Helper to get trades link with current filters
 const getTradesLink = (searchParams: URLSearchParams) => {
@@ -65,6 +69,21 @@ export default function Dashboard() {
   const [dashboardView, setDashboardView] = useState<DashboardView>('overview');
   const [detailedSubView, setDetailedSubView] = useState<DetailedSubView>('stats');
   const [winLosingDaysSubView, setWinLosingDaysSubView] = useState<WinLosingDaysSubView>('stats');
+  const [displayMode, setDisplayMode] = useState<DisplayMode>('dollars');
+
+  // Format value based on display mode
+  const formatValue = (dollarValue: number, rValue: number | null): string => {
+    if (displayMode === 'R') {
+      return rValue !== null ? formatR(rValue) : 'n/a';
+    }
+    return formatCurrency(dollarValue);
+  };
+
+  // Get the R value for a given trade
+  const getTradeRValue = (trade: Trade): number | null => {
+    const metrics = calculateTradeMetrics(trade);
+    return metrics.realizedR;
+  };
   
   const { filters, setFilter, setDatePreset, clearDateFilters, filterTrades, hasActiveFilters } = useTradeFilters();
 
@@ -164,7 +183,7 @@ export default function Dashboard() {
     });
   })();
 
-  // Generate Gross Cumulative P/L chart data (uses filters)
+  // Generate Gross Cumulative P/L chart data (uses filters) - includes both $ and R
   const grossCumulativePnLData = (() => {
     const closedTrades = filteredTrades.filter(t => t.exit_datetime !== null);
     if (closedTrades.length === 0) return [];
@@ -174,7 +193,7 @@ export default function Dashboard() {
     );
 
     // Group by date for cleaner chart
-    const dailyData = new Map<string, { grossPnL: number; date: Date }>();
+    const dailyData = new Map<string, { grossPnL: number; grossR: number; date: Date }>();
     
     sorted.forEach(trade => {
       const dateKey = format(new Date(trade.exit_datetime!), 'yyyy-MM-dd');
@@ -182,52 +201,62 @@ export default function Dashboard() {
       const existing = dailyData.get(dateKey);
       if (existing) {
         existing.grossPnL += metrics.grossPnL;
+        existing.grossR += metrics.realizedR ?? 0;
       } else {
-        dailyData.set(dateKey, { grossPnL: metrics.grossPnL, date: new Date(trade.exit_datetime!) });
+        dailyData.set(dateKey, { 
+          grossPnL: metrics.grossPnL, 
+          grossR: metrics.realizedR ?? 0,
+          date: new Date(trade.exit_datetime!) 
+        });
       }
     });
 
     // Convert to cumulative
-    let cumulative = 0;
-    const result: { date: string; cumulative: number; dailyPnL: number }[] = [];
+    let cumulativePnL = 0;
+    let cumulativeR = 0;
+    const result: { date: string; cumulative: number; cumulativeR: number; dailyPnL: number; dailyR: number }[] = [];
     
     Array.from(dailyData.entries())
       .sort(([a], [b]) => a.localeCompare(b))
       .forEach(([dateKey, data]) => {
-        cumulative += data.grossPnL;
+        cumulativePnL += data.grossPnL;
+        cumulativeR += data.grossR;
         result.push({
           date: format(data.date, 'yyyy-MM-dd'),
-          cumulative,
+          cumulative: cumulativePnL,
+          cumulativeR: cumulativeR,
           dailyPnL: data.grossPnL,
+          dailyR: data.grossR,
         });
       });
 
     return result;
   })();
 
-  // Determine chart title based on filter state
+  // Determine chart title based on filter state and display mode
   const getGrossChartTitle = () => {
+    const valueLabel = displayMode === 'dollars' ? 'P&L' : 'R';
     if (!hasActiveFilters) {
-      return 'Gross Cumulative P&L (All Time)';
+      return `Gross Cumulative ${valueLabel} (All Time)`;
     }
     if (filters.dateFrom && filters.dateTo) {
-      return `Gross Cumulative P&L (${format(new Date(filters.dateFrom), 'MMM d, yyyy')} - ${format(new Date(filters.dateTo), 'MMM d, yyyy')})`;
+      return `Gross Cumulative ${valueLabel} (${format(new Date(filters.dateFrom), 'MMM d, yyyy')} - ${format(new Date(filters.dateTo), 'MMM d, yyyy')})`;
     }
     if (filters.dateFrom) {
-      return `Gross Cumulative P&L (From ${format(new Date(filters.dateFrom), 'MMM d, yyyy')})`;
+      return `Gross Cumulative ${valueLabel} (From ${format(new Date(filters.dateFrom), 'MMM d, yyyy')})`;
     }
     if (filters.dateTo) {
-      return `Gross Cumulative P&L (Until ${format(new Date(filters.dateTo), 'MMM d, yyyy')})`;
+      return `Gross Cumulative ${valueLabel} (Until ${format(new Date(filters.dateTo), 'MMM d, yyyy')})`;
     }
-    return 'Gross Cumulative P&L (Filtered)';
+    return `Gross Cumulative ${valueLabel} (Filtered)`;
   };
 
-  // Year/Month/Day distribution and performance data
+  // Year/Month/Day distribution and performance data - includes both $ and R
   const timeGroupedData = (() => {
     const closedTrades = filteredTrades.filter(t => t.exit_datetime !== null);
     if (closedTrades.length === 0) return [];
 
-    const grouped = new Map<string, { trades: number; pnl: number }>();
+    const grouped = new Map<string, { trades: number; pnl: number; rValue: number }>();
 
     closedTrades.forEach(trade => {
       const exitDate = new Date(trade.exit_datetime!);
@@ -250,8 +279,9 @@ export default function Dashboard() {
       if (existing) {
         existing.trades += 1;
         existing.pnl += metrics.grossPnL;
+        existing.rValue += metrics.realizedR ?? 0;
       } else {
-        grouped.set(key, { trades: 1, pnl: metrics.grossPnL });
+        grouped.set(key, { trades: 1, pnl: metrics.grossPnL, rValue: metrics.realizedR ?? 0 });
       }
     });
 
@@ -261,6 +291,7 @@ export default function Dashboard() {
         period,
         trades: data.trades,
         pnl: data.pnl,
+        rValue: data.rValue,
       }));
   })();
 
@@ -331,7 +362,21 @@ export default function Dashboard() {
               {hasActiveFilters && ` · Filtered: ${filteredTrades.length} trades`}
             </p>
           </div>
-          <div className="flex gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            {/* Display Mode Toggle */}
+            <ToggleGroup 
+              type="single" 
+              value={displayMode} 
+              onValueChange={(v) => v && setDisplayMode(v as DisplayMode)}
+              className="border rounded-md"
+            >
+              <ToggleGroupItem value="dollars" aria-label="Show in dollars" className="px-3">
+                <DollarSign className="h-4 w-4" />
+              </ToggleGroupItem>
+              <ToggleGroupItem value="R" aria-label="Show in R multiples" className="px-3">
+                <span className="font-semibold text-sm">R</span>
+              </ToggleGroupItem>
+            </ToggleGroup>
             <Button variant="outline" onClick={exportToExcel}>
               <Download className="mr-2 h-4 w-4" />
               Export Excel
@@ -376,10 +421,13 @@ export default function Dashboard() {
             {/* KPI Cards */}
             <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
               <KPICard
-                title="Total Net P/L"
-                value={formatCurrency(analytics?.totalNetPnL || 0)}
+                title={displayMode === 'dollars' ? "Total Net P/L" : "Total R"}
+                value={displayMode === 'dollars' 
+                  ? formatCurrency(analytics?.totalNetPnL || 0)
+                  : formatR(analytics?.totalR || 0)
+                }
                 icon={<Activity className="h-5 w-5" />}
-                variant={analytics?.totalNetPnL && analytics.totalNetPnL >= 0 ? 'profit' : 'loss'}
+                variant={(displayMode === 'dollars' ? (analytics?.totalNetPnL || 0) : (analytics?.totalR || 0)) >= 0 ? 'profit' : 'loss'}
               />
               <KPICard
                 title="Win Rate"
@@ -409,7 +457,9 @@ export default function Dashboard() {
                   <CardDescription>
                     {hasActiveFilters 
                       ? `Showing ${grossCumulativePnLData.length} trading days based on active filters`
-                      : 'Cumulative gross profit/loss across your entire trading history'
+                      : displayMode === 'dollars' 
+                        ? 'Cumulative gross profit/loss across your entire trading history'
+                        : 'Cumulative R-multiple performance across your entire trading history'
                     }
                   </CardDescription>
                 </CardHeader>
@@ -443,7 +493,10 @@ export default function Dashboard() {
                             className="text-xs fill-muted-foreground"
                             tickLine={false}
                             axisLine={false}
-                            tickFormatter={(value) => `$${value.toLocaleString()}`}
+                            tickFormatter={(value) => displayMode === 'dollars' 
+                              ? `$${value.toLocaleString()}` 
+                              : `${value.toFixed(1)}R`
+                            }
                           />
                           <Tooltip 
                             contentStyle={{ 
@@ -456,15 +509,21 @@ export default function Dashboard() {
                             labelFormatter={(value) => format(new Date(value), 'EEEE, MMM d, yyyy')}
                             formatter={(value: number, name: string) => {
                               const color = value >= 0 ? 'hsl(142 76% 36%)' : 'hsl(0 84% 60%)';
+                              const formattedValue = displayMode === 'dollars' 
+                                ? formatCurrency(value) 
+                                : `${value >= 0 ? '+' : ''}${value.toFixed(2)}R`;
+                              const labelSuffix = displayMode === 'dollars' ? 'P/L' : 'R';
                               return [
-                                <span style={{ color, fontWeight: 600 }}>{formatCurrency(value)}</span>, 
-                                name === 'cumulative' ? 'Cumulative P/L' : 'Daily P/L'
+                                <span style={{ color, fontWeight: 600 }}>{formattedValue}</span>, 
+                                name === (displayMode === 'dollars' ? 'cumulative' : 'cumulativeR') 
+                                  ? `Cumulative ${labelSuffix}` 
+                                  : `Daily ${labelSuffix}`
                               ];
                             }}
                           />
                           <Area
                             type="monotone"
-                            dataKey="cumulative"
+                            dataKey={displayMode === 'dollars' ? 'cumulative' : 'cumulativeR'}
                             stroke="hsl(var(--profit))"
                             strokeWidth={2}
                             fill="url(#colorGrossPnL)"
@@ -517,7 +576,10 @@ export default function Dashboard() {
                                 </p>
                               </div>
                             </div>
-                            <PnLBadge value={metrics.netPnL} />
+                            <PnLBadge 
+                              value={displayMode === 'dollars' ? metrics.netPnL : (metrics.realizedR ?? 0)} 
+                              format={displayMode === 'dollars' ? 'currency' : 'r'}
+                            />
                           </Link>
                         );
                       })}
@@ -884,7 +946,9 @@ export default function Dashboard() {
               <Card>
                 <CardHeader>
                   <CardTitle className="text-base">Performance by {timeGranularity.charAt(0).toUpperCase() + timeGranularity.slice(1)}</CardTitle>
-                  <CardDescription>Gross P/L per {timeGranularity}</CardDescription>
+                  <CardDescription>
+                    {displayMode === 'dollars' ? 'Gross P/L' : 'R-Multiple'} per {timeGranularity}
+                  </CardDescription>
                 </CardHeader>
                 <CardContent>
                   {timeGroupedData.length > 0 ? (
@@ -903,7 +967,10 @@ export default function Dashboard() {
                             className="text-xs fill-muted-foreground"
                             tickLine={false}
                             axisLine={false}
-                            tickFormatter={(value) => `$${value.toLocaleString()}`}
+                            tickFormatter={(value) => displayMode === 'dollars' 
+                              ? `$${value.toLocaleString()}` 
+                              : `${value.toFixed(1)}R`
+                            }
                           />
                           <Tooltip 
                             contentStyle={{ 
@@ -915,20 +982,23 @@ export default function Dashboard() {
                             labelStyle={{ color: 'hsl(0 0% 98%)', fontWeight: 600, marginBottom: '4px' }}
                             formatter={(value: number) => {
                               const color = value >= 0 ? 'hsl(142 76% 36%)' : 'hsl(0 84% 60%)';
+                              const formattedValue = displayMode === 'dollars' 
+                                ? formatCurrency(value) 
+                                : `${value >= 0 ? '+' : ''}${value.toFixed(2)}R`;
                               return [
-                                <span style={{ color, fontWeight: 600 }}>{formatCurrency(value)}</span>,
-                                'P/L'
+                                <span style={{ color, fontWeight: 600 }}>{formattedValue}</span>,
+                                displayMode === 'dollars' ? 'P/L' : 'R'
                               ];
                             }}
                           />
                           <Bar 
-                            dataKey="pnl" 
+                            dataKey={displayMode === 'dollars' ? 'pnl' : 'rValue'} 
                             radius={[4, 4, 0, 0]}
                           >
                             {timeGroupedData.map((entry, index) => (
                               <Cell 
                                 key={`cell-${index}`} 
-                                fill={entry.pnl >= 0 ? 'hsl(var(--profit))' : 'hsl(var(--loss))'} 
+                                fill={(displayMode === 'dollars' ? entry.pnl : entry.rValue) >= 0 ? 'hsl(var(--profit))' : 'hsl(var(--loss))'} 
                               />
                             ))}
                           </Bar>
