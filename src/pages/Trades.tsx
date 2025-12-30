@@ -120,19 +120,35 @@ export default function Trades() {
   const fetchTrades = async () => {
     try {
       console.log('Fetching trades for user:', user?.id);
-      // Fetch all trades - use a high limit to get all rows (default is 1000)
-      const { data, error } = await supabase
-        .from('trades')
-        .select('*, strategies(*), accounts(*)')
-        .eq('user_id', user?.id)
-        .order('entry_datetime', { ascending: false })
-        .limit(10000);
+      
+      // Fetch all trades using range-based pagination to overcome the 1000 row limit
+      let allTrades: any[] = [];
+      let from = 0;
+      const batchSize = 1000;
+      let hasMore = true;
+      
+      while (hasMore) {
+        const { data, error } = await supabase
+          .from('trades')
+          .select('*, strategies(*), accounts(*)')
+          .eq('user_id', user?.id)
+          .order('entry_datetime', { ascending: false })
+          .range(from, from + batchSize - 1);
 
-      console.log('Trades fetched:', data?.length, 'Error:', error);
+        if (error) throw error;
+        
+        if (data && data.length > 0) {
+          allTrades = [...allTrades, ...data];
+          from += batchSize;
+          hasMore = data.length === batchSize;
+        } else {
+          hasMore = false;
+        }
+      }
+
+      console.log('Total trades fetched:', allTrades.length);
       
-      if (error) throw error;
-      
-      const typedTrades = (data || []).map(t => ({
+      const typedTrades = allTrades.map(t => ({
         ...t,
         entry_price: Number(t.entry_price),
         exit_price: t.exit_price ? Number(t.exit_price) : null,
