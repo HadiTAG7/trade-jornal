@@ -105,6 +105,7 @@ export interface DailyStats {
 
 export interface AnalyticsData {
   totalNetPnL: number;
+  totalR: number;
   totalTrades: number;
   winRate: number;
   avgR: number;
