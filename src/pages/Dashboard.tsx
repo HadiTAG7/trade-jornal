@@ -6,8 +6,10 @@ import {
   Target, 
   BarChart3, 
   ArrowRight,
-  Activity
+  Activity,
+  Download
 } from 'lucide-react';
+import * as XLSX from 'xlsx';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { KPICard } from '@/components/ui/kpi-card';
 import { TradeBadge, PnLBadge } from '@/components/ui/trade-badge';
@@ -264,6 +266,49 @@ export default function Dashboard() {
 
   const recentTrades = filteredTrades.slice(0, 5);
 
+  // Export filtered trades to Excel
+  const exportToExcel = () => {
+    const closedTrades = filteredTrades.filter(t => t.exit_datetime !== null);
+    
+    const exportData = closedTrades.map(trade => {
+      const metrics = calculateTradeMetrics(trade);
+      const holdTimeMinutes = trade.exit_datetime && trade.entry_datetime
+        ? (new Date(trade.exit_datetime).getTime() - new Date(trade.entry_datetime).getTime()) / (1000 * 60)
+        : null;
+      return {
+        'Symbol': trade.symbol,
+        'Side': trade.side,
+        'Entry Date': trade.entry_datetime ? format(new Date(trade.entry_datetime), 'yyyy-MM-dd HH:mm:ss') : '',
+        'Exit Date': trade.exit_datetime ? format(new Date(trade.exit_datetime), 'yyyy-MM-dd HH:mm:ss') : '',
+        'Entry Price': trade.entry_price,
+        'Exit Price': trade.exit_price,
+        'Quantity': trade.quantity,
+        'Gross P/L': metrics.grossPnL,
+        'Net P/L': metrics.netPnL,
+        'R Multiple': metrics.realizedR !== null ? metrics.realizedR : '',
+        'Fees': trade.fees,
+        'Commissions': trade.commissions,
+        'Stop Loss': trade.stop_loss || '',
+        'Strategy': trade.strategy?.name || '',
+        'Hold Time (min)': holdTimeMinutes !== null ? Math.round(holdTimeMinutes) : '',
+        'Notes': trade.notes || '',
+      };
+    });
+
+    const worksheet = XLSX.utils.json_to_sheet(exportData);
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, 'Trades');
+    
+    // Auto-size columns
+    const maxWidths = Object.keys(exportData[0] || {}).map(key => 
+      Math.max(key.length, ...exportData.map(row => String(row[key as keyof typeof row] || '').length))
+    );
+    worksheet['!cols'] = maxWidths.map(w => ({ wch: Math.min(w + 2, 40) }));
+    
+    const dateStr = format(new Date(), 'yyyy-MM-dd');
+    XLSX.writeFile(workbook, `trades-export-${dateStr}.xlsx`);
+  };
+
   if (loading) {
     return (
       <MainLayout>
@@ -287,6 +332,10 @@ export default function Dashboard() {
             </p>
           </div>
           <div className="flex gap-2">
+            <Button variant="outline" onClick={exportToExcel}>
+              <Download className="mr-2 h-4 w-4" />
+              Export Excel
+            </Button>
             <Button asChild variant="outline">
               <Link to="/import">
                 <TrendingUp className="mr-2 h-4 w-4" />
