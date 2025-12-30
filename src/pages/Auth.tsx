@@ -42,16 +42,31 @@ export default function Auth() {
       if (isLogin) {
         const { error } = await signIn(data.email, data.password);
         if (error) {
-          toast({
-            variant: 'destructive',
-            title: 'Sign in failed',
-            description: error.message,
-          });
+          // Check if it's a network error
+          if (error.message.includes('Failed to fetch') || error.message.includes('NetworkError')) {
+            toast({
+              variant: 'destructive',
+              title: 'Connection error',
+              description: 'Unable to connect to the server. Please check your internet connection and try again.',
+            });
+          } else {
+            toast({
+              variant: 'destructive',
+              title: 'Sign in failed',
+              description: error.message,
+            });
+          }
         }
       } else {
         const { error } = await signUp(data.email, data.password);
         if (error) {
-          if (error.message.includes('already registered')) {
+          if (error.message.includes('Failed to fetch') || error.message.includes('NetworkError')) {
+            toast({
+              variant: 'destructive',
+              title: 'Connection error',
+              description: 'Unable to connect to the server. Please check your internet connection and try again.',
+            });
+          } else if (error.message.includes('already registered')) {
             toast({
               variant: 'destructive',
               title: 'Account exists',
