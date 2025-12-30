@@ -74,15 +74,32 @@ export default function Dashboard() {
 
   const fetchTrades = async () => {
     try {
-      const { data, error } = await supabase
-        .from('trades')
-        .select('*, strategies(*)')
-        .eq('user_id', user?.id)
-        .order('entry_datetime', { ascending: false });
-
-      if (error) throw error;
+      // Fetch all trades using range-based pagination to overcome the 1000 row limit
+      let allTrades: any[] = [];
+      let from = 0;
+      const batchSize = 1000;
+      let hasMore = true;
       
-      const typedTrades = (data || []).map(t => ({
+      while (hasMore) {
+        const { data, error } = await supabase
+          .from('trades')
+          .select('*, strategies(*)')
+          .eq('user_id', user?.id)
+          .order('entry_datetime', { ascending: false })
+          .range(from, from + batchSize - 1);
+
+        if (error) throw error;
+        
+        if (data && data.length > 0) {
+          allTrades = [...allTrades, ...data];
+          from += batchSize;
+          hasMore = data.length === batchSize;
+        } else {
+          hasMore = false;
+        }
+      }
+      
+      const typedTrades = allTrades.map(t => ({
         ...t,
         entry_price: Number(t.entry_price),
         exit_price: t.exit_price ? Number(t.exit_price) : null,
