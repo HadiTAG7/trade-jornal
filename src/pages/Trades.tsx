@@ -179,9 +179,10 @@ export default function Trades() {
   }, [filteredTrades, currentPage, rowsPerPage]);
   
   // Reset to page 1 when filters change
+  const filtersKey = `${filters.searchQuery}-${filters.sideFilter}-${filters.strategyFilter}-${filters.dateFrom?.toISOString()}-${filters.dateTo?.toISOString()}`;
   useEffect(() => {
     setCurrentPage(1);
-  }, [filters]);
+  }, [filtersKey]);
   
   // Persist rows per page
   useEffect(() => {
