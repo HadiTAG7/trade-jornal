@@ -326,6 +326,7 @@ export default function Import() {
     
     try {
       const newTrades = parsedTrades.filter(t => !t.isDuplicate);
+      let actuallyImported = 0;
       
       if (newTrades.length > 0) {
         const tradesToInsert = newTrades.map(t => ({
@@ -347,8 +348,17 @@ export default function Import() {
           source: source,
         }));
 
-        const { error } = await supabase.from('trades').insert(tradesToInsert);
+        // Use upsert with onConflict to skip duplicates gracefully
+        const { data, error } = await supabase
+          .from('trades')
+          .upsert(tradesToInsert, { 
+            onConflict: 'user_id,stable_hash',
+            ignoreDuplicates: true 
+          })
+          .select('id');
+        
         if (error) throw error;
+        actuallyImported = data?.length || 0;
       }
 
       // Log the import
@@ -357,20 +367,20 @@ export default function Import() {
         source_name: source,
         filename: file?.name || 'unknown',
         rows_total: parsedTrades.length,
-        rows_new: newTrades.length,
-        rows_skipped: parsedTrades.length - newTrades.length,
+        rows_new: actuallyImported,
+        rows_skipped: parsedTrades.length - actuallyImported,
       });
 
       setImportResult({
         total: parsedTrades.length,
-        new: newTrades.length,
-        skipped: parsedTrades.length - newTrades.length,
+        new: actuallyImported,
+        skipped: parsedTrades.length - actuallyImported,
       });
       setStep('complete');
 
       toast({
         title: 'Import complete',
-        description: `${newTrades.length} trades imported successfully`,
+        description: `${actuallyImported} trades imported successfully`,
       });
     } catch (error: any) {
       toast({
