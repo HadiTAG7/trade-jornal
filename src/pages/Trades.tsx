@@ -120,11 +120,13 @@ export default function Trades() {
   const fetchTrades = async () => {
     try {
       console.log('Fetching trades for user:', user?.id);
+      // Fetch all trades - use a high limit to get all rows (default is 1000)
       const { data, error } = await supabase
         .from('trades')
         .select('*, strategies(*), accounts(*)')
         .eq('user_id', user?.id)
-        .order('entry_datetime', { ascending: false });
+        .order('entry_datetime', { ascending: false })
+        .limit(10000);
 
       console.log('Trades fetched:', data?.length, 'Error:', error);
       
