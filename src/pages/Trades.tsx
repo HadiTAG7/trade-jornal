@@ -119,12 +119,15 @@ export default function Trades() {
 
   const fetchTrades = async () => {
     try {
+      console.log('Fetching trades for user:', user?.id);
       const { data, error } = await supabase
         .from('trades')
         .select('*, strategies(*), accounts(*)')
         .eq('user_id', user?.id)
         .order('entry_datetime', { ascending: false });
 
+      console.log('Trades fetched:', data?.length, 'Error:', error);
+      
       if (error) throw error;
       
       const typedTrades = (data || []).map(t => ({
@@ -141,6 +144,7 @@ export default function Trades() {
         account: t.accounts,
       })) as Trade[];
       
+      console.log('Typed trades set:', typedTrades.length);
       setTrades(typedTrades);
     } catch (error) {
       console.error('Error fetching trades:', error);
