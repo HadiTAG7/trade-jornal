@@ -1,6 +1,6 @@
 import { useState, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Upload, FileSpreadsheet, AlertCircle, CheckCircle, ChevronRight, Loader2 } from 'lucide-react';
+import { Upload, FileSpreadsheet, AlertCircle, CheckCircle, ChevronRight, Loader2, Clock, AlertTriangle, Info } from 'lucide-react';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -10,10 +10,13 @@ import { useToast } from '@/hooks/use-toast';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
 import { generateStableHash } from '@/lib/calculations';
+import { parseTOSAccountStatement, TIMEZONE_OPTIONS, ReconstructedTrade, TOSParseResult } from '@/lib/tosAccountStatementParser';
 import { cn } from '@/lib/utils';
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
+import { Badge } from '@/components/ui/badge';
 
 type ImportStep = 'upload' | 'mapping' | 'preview' | 'complete';
-type ImportSource = 'ThinkOrSwim' | 'TraderVue' | 'Custom';
+type ImportSource = 'ThinkOrSwim' | 'ThinkOrSwim-AccountStatement' | 'TraderVue' | 'Custom';
 
 interface ColumnMapping {
   symbol: string;
@@ -51,9 +54,12 @@ interface ParsedTrade {
   stable_hash: string;
   isDuplicate?: boolean;
   calculated_exit_price?: number | null;
+  grossPnL?: number;
+  netPnL?: number;
+  duration?: number;
 }
 
-const defaultMappings: Record<ImportSource, ColumnMapping> = {
+const defaultMappings: Record<Exclude<ImportSource, 'ThinkOrSwim-AccountStatement'>, ColumnMapping> = {
   ThinkOrSwim: {
     symbol: 'Symbol',
     side: 'Side',
@@ -107,6 +113,11 @@ export default function Import() {
   const [parsedTrades, setParsedTrades] = useState<ParsedTrade[]>([]);
   const [importing, setImporting] = useState(false);
   const [importResult, setImportResult] = useState<{ total: number; new: number; skipped: number } | null>(null);
+  
+  // TOS Account Statement specific state
+  const [sourceTimezone, setSourceTimezone] = useState('America/Chicago');
+  const [tosParseResult, setTosParseResult] = useState<TOSParseResult | null>(null);
+  const [rawCsvText, setRawCsvText] = useState<string>('');
 
   const parseCSVLine = (line: string): string[] => {
     const result: string[] = [];
@@ -171,6 +182,29 @@ export default function Import() {
           return;
         }
 
+        // Store raw text for TOS Account Statement parsing
+        setRawCsvText(text);
+
+        // For TOS Account Statement, skip standard CSV parsing
+        if (source === 'ThinkOrSwim-AccountStatement') {
+          // Parse TOS format
+          const result = parseTOSAccountStatement(text, sourceTimezone);
+          setTosParseResult(result);
+          
+          if (result.errors.length > 0) {
+            toast({
+              variant: 'destructive',
+              title: 'Parse Error',
+              description: result.errors[0],
+            });
+            return;
+          }
+          
+          // Convert to ParsedTrade format and check for duplicates
+          checkTOSDuplicatesAndProceed(result);
+          return;
+        }
+
         // Split by newlines (handle both Windows and Unix line endings)
         const lines = text.split(/\r?\n/).filter(line => line.trim().length > 0);
         
@@ -189,7 +223,7 @@ export default function Import() {
 
         setHeaders(headerRow);
         setCsvData(dataRows);
-        setMapping(defaultMappings[source]);
+        setMapping(defaultMappings[source as Exclude<ImportSource, 'ThinkOrSwim-AccountStatement'>] || defaultMappings.Custom);
         setStep('mapping');
         
         toast({
@@ -206,11 +240,74 @@ export default function Import() {
       }
     };
     reader.readAsText(uploadedFile);
-  }, [source, toast]);
+  }, [source, sourceTimezone, toast]);
+
+  const checkTOSDuplicatesAndProceed = async (result: TOSParseResult) => {
+    // Convert to ParsedTrade format
+    const trades: ParsedTrade[] = result.completedTrades.map(t => ({
+      symbol: t.symbol,
+      side: t.side,
+      entry_datetime: t.entryDatetime,
+      exit_datetime: t.exitDatetime,
+      entry_price: t.entryPrice,
+      exit_price: t.exitPrice,
+      quantity: t.quantity,
+      fees: t.fees,
+      commissions: t.commissions,
+      stop_loss: null,
+      notes: null,
+      mfe: null,
+      mae: null,
+      stable_hash: t.stableHash,
+      grossPnL: t.grossPnL,
+      netPnL: t.netPnL,
+      duration: t.duration,
+    }));
+
+    // Check for duplicates
+    const { data: existingTrades } = await supabase
+      .from('trades')
+      .select('stable_hash')
+      .eq('user_id', user?.id);
+
+    const existingHashes = new Set((existingTrades || []).map(t => t.stable_hash));
+    
+    trades.forEach(trade => {
+      trade.isDuplicate = existingHashes.has(trade.stable_hash);
+    });
+
+    setParsedTrades(trades);
+    setStep('preview');
+    
+    toast({
+      title: 'File parsed successfully',
+      description: `Found ${result.executions.length} executions, reconstructed ${trades.length} trades`,
+    });
+  };
 
   const handleSourceChange = (newSource: ImportSource) => {
     setSource(newSource);
-    setMapping(defaultMappings[newSource]);
+    if (newSource !== 'ThinkOrSwim-AccountStatement') {
+      setMapping(defaultMappings[newSource as Exclude<ImportSource, 'ThinkOrSwim-AccountStatement'>] || defaultMappings.Custom);
+    }
+    // Reset file when changing source
+    setFile(null);
+    setCsvData([]);
+    setHeaders([]);
+    setParsedTrades([]);
+    setTosParseResult(null);
+  };
+
+  const handleTimezoneChange = (tz: string) => {
+    setSourceTimezone(tz);
+    // Re-parse if we have raw CSV text
+    if (rawCsvText && source === 'ThinkOrSwim-AccountStatement') {
+      const result = parseTOSAccountStatement(rawCsvText, tz);
+      setTosParseResult(result);
+      if (result.errors.length === 0) {
+        checkTOSDuplicatesAndProceed(result);
+      }
+    }
   };
 
   const parseTrades = async () => {
@@ -345,7 +442,7 @@ export default function Import() {
           mfe: t.mfe,
           mae: t.mae,
           stable_hash: t.stable_hash,
-          source: source,
+          source: source === 'ThinkOrSwim-AccountStatement' ? 'ThinkOrSwim' : source,
         }));
 
         // Use upsert with onConflict to skip duplicates gracefully
@@ -361,10 +458,11 @@ export default function Import() {
         actuallyImported = data?.length || 0;
       }
 
-      // Log the import
+      // Log the import - use 'ThinkOrSwim' for account statement imports
+      const sourceToLog = source === 'ThinkOrSwim-AccountStatement' ? 'ThinkOrSwim' : source;
       await supabase.from('imports').insert({
         user_id: user?.id,
-        source_name: source,
+        source_name: sourceToLog as 'ThinkOrSwim' | 'TraderVue' | 'Custom',
         filename: file?.name || 'unknown',
         rows_total: parsedTrades.length,
         rows_new: actuallyImported,
@@ -391,6 +489,13 @@ export default function Import() {
     } finally {
       setImporting(false);
     }
+  };
+
+  const formatDuration = (minutes: number | undefined): string => {
+    if (!minutes) return '-';
+    if (minutes < 60) return `${Math.round(minutes)} min`;
+    if (minutes < 1440) return `${(minutes / 60).toFixed(1)} hrs`;
+    return `${(minutes / 1440).toFixed(1)} days`;
   };
 
   return (
@@ -433,12 +538,48 @@ export default function Import() {
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="ThinkOrSwim">ThinkOrSwim</SelectItem>
+                    <SelectItem value="ThinkOrSwim">ThinkOrSwim (Trade Log)</SelectItem>
+                    <SelectItem value="ThinkOrSwim-AccountStatement">ThinkOrSwim (Account Statement CSV)</SelectItem>
                     <SelectItem value="TraderVue">TraderVue</SelectItem>
                     <SelectItem value="Custom">Custom CSV</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
+
+              {/* TOS Account Statement specific options */}
+              {source === 'ThinkOrSwim-AccountStatement' && (
+                <div className="space-y-4">
+                  <Alert>
+                    <Info className="h-4 w-4" />
+                    <AlertTitle>Account Statement Import</AlertTitle>
+                    <AlertDescription>
+                      This parser reads the multi-section "Account Statement" CSV from TOS. 
+                      It will extract executions from the "Account Trade History" section and 
+                      reconstruct complete trades using FIFO matching.
+                    </AlertDescription>
+                  </Alert>
+
+                  <div className="space-y-2">
+                    <Label className="flex items-center gap-2">
+                      <Clock className="h-4 w-4" />
+                      Source Timezone (your local time)
+                    </Label>
+                    <Select value={sourceTimezone} onValueChange={setSourceTimezone}>
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {TIMEZONE_OPTIONS.map(tz => (
+                          <SelectItem key={tz.value} value={tz.value}>{tz.label}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <p className="text-xs text-muted-foreground">
+                      TOS exports timestamps in your local timezone. Select your timezone to convert to market time (US Eastern).
+                    </p>
+                  </div>
+                </div>
+              )}
 
               <div className="border-2 border-dashed border-border rounded-lg p-8 text-center hover:border-primary/50 transition-colors">
                 <input
@@ -458,7 +599,7 @@ export default function Import() {
           </Card>
         )}
 
-        {step === 'mapping' && (
+        {step === 'mapping' && source !== 'ThinkOrSwim-AccountStatement' && (
           <Card>
             <CardHeader>
               <CardTitle>Map Columns</CardTitle>
@@ -520,6 +661,61 @@ export default function Import() {
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
+              {/* TOS specific warnings */}
+              {source === 'ThinkOrSwim-AccountStatement' && tosParseResult && (
+                <div className="space-y-3">
+                  {/* Stats summary */}
+                  <div className="flex flex-wrap gap-2">
+                    <Badge variant="secondary">
+                      {tosParseResult.executions.length} executions parsed
+                    </Badge>
+                    <Badge variant="secondary">
+                      {tosParseResult.completedTrades.length} complete trades
+                    </Badge>
+                    {tosParseResult.fees.length > 0 && (
+                      <Badge variant="secondary">
+                        {tosParseResult.fees.length} fee records
+                      </Badge>
+                    )}
+                  </div>
+
+                  {/* Warnings */}
+                  {tosParseResult.warnings.length > 0 && (
+                    <Alert variant="default">
+                      <AlertTriangle className="h-4 w-4" />
+                      <AlertTitle>Warnings</AlertTitle>
+                      <AlertDescription>
+                        <ul className="list-disc list-inside text-sm space-y-1 mt-1">
+                          {tosParseResult.warnings.slice(0, 5).map((w, i) => (
+                            <li key={i}>{w}</li>
+                          ))}
+                          {tosParseResult.warnings.length > 5 && (
+                            <li>... and {tosParseResult.warnings.length - 5} more</li>
+                          )}
+                        </ul>
+                      </AlertDescription>
+                    </Alert>
+                  )}
+
+                  {/* Unmatched opens */}
+                  {tosParseResult.unmatchedOpens.length > 0 && (
+                    <Alert>
+                      <Info className="h-4 w-4" />
+                      <AlertTitle>Open Positions (not imported)</AlertTitle>
+                      <AlertDescription>
+                        <ul className="list-disc list-inside text-sm space-y-1 mt-1">
+                          {tosParseResult.unmatchedOpens.map((o, i) => (
+                            <li key={i}>
+                              {o.symbol} - {o.side}: {o.qty} shares @ ${o.avgPrice.toFixed(2)}
+                            </li>
+                          ))}
+                        </ul>
+                      </AlertDescription>
+                    </Alert>
+                  )}
+                </div>
+              )}
+
               <div className="max-h-[400px] overflow-y-auto border rounded-lg">
                 <table className="w-full text-sm">
                   <thead className="bg-muted sticky top-0">
@@ -530,6 +726,12 @@ export default function Import() {
                       <th className="text-right p-2">Entry</th>
                       <th className="text-right p-2">Exit</th>
                       <th className="text-right p-2">Qty</th>
+                      {source === 'ThinkOrSwim-AccountStatement' && (
+                        <>
+                          <th className="text-right p-2">P/L</th>
+                          <th className="text-right p-2">Duration</th>
+                        </>
+                      )}
                     </tr>
                   </thead>
                   <tbody>
@@ -546,10 +748,27 @@ export default function Import() {
                           )}
                         </td>
                         <td className="p-2 font-medium">{trade.symbol}</td>
-                        <td className="p-2">{trade.side}</td>
+                        <td className="p-2">
+                          <Badge variant={trade.side === 'LONG' ? 'default' : 'secondary'}>
+                            {trade.side}
+                          </Badge>
+                        </td>
                         <td className="p-2 text-right font-mono">${trade.entry_price.toFixed(2)}</td>
                         <td className="p-2 text-right font-mono">{trade.exit_price ? `$${trade.exit_price.toFixed(2)}` : '-'}</td>
                         <td className="p-2 text-right font-mono">{trade.quantity}</td>
+                        {source === 'ThinkOrSwim-AccountStatement' && (
+                          <>
+                            <td className={cn(
+                              'p-2 text-right font-mono',
+                              trade.netPnL && trade.netPnL > 0 ? 'text-profit' : 'text-loss'
+                            )}>
+                              {trade.netPnL ? `$${trade.netPnL.toFixed(2)}` : '-'}
+                            </td>
+                            <td className="p-2 text-right text-muted-foreground">
+                              {formatDuration(trade.duration)}
+                            </td>
+                          </>
+                        )}
                       </tr>
                     ))}
                   </tbody>
@@ -562,7 +781,7 @@ export default function Import() {
               </div>
 
               <div className="flex justify-between pt-4">
-                <Button variant="outline" onClick={() => setStep('mapping')}>Back</Button>
+                <Button variant="outline" onClick={() => setStep('upload')}>Back</Button>
                 <Button onClick={handleImport} disabled={importing || parsedTrades.filter(t => !t.isDuplicate).length === 0}>
                   {importing && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                   Import {parsedTrades.filter(t => !t.isDuplicate).length} Trades
@@ -589,6 +808,8 @@ export default function Import() {
                   setFile(null);
                   setCsvData([]);
                   setParsedTrades([]);
+                  setTosParseResult(null);
+                  setRawCsvText('');
                 }}>
                   Import More
                 </Button>
