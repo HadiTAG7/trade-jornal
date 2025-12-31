@@ -74,6 +74,10 @@ export const TIMEZONE_OPTIONS = [
   { value: 'America/Chicago', label: 'US Central (CST/CDT)' },
   { value: 'America/Denver', label: 'US Mountain' },
   { value: 'America/Los_Angeles', label: 'US Pacific' },
+  { value: 'Asia/Riyadh', label: 'Riyadh (Arabia Standard Time, UTC+3)' },
+  { value: 'Europe/London', label: 'London (GMT/BST)' },
+  { value: 'Asia/Dubai', label: 'Dubai (GST, UTC+4)' },
+  { value: 'Asia/Singapore', label: 'Singapore (SGT, UTC+8)' },
   { value: 'UTC', label: 'UTC' },
 ];
 
