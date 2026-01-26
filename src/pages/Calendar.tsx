@@ -209,8 +209,13 @@ export default function CalendarPage() {
                       return (
                         <button
                           key={dateStr}
-                          onClick={() => isCurrentMonth && setSelectedDate(dateStr)}
+                          onClick={() => {
+                            if (isCurrentMonth) {
+                              setSelectedDate(dateStr);
+                            }
+                          }}
                           disabled={!isCurrentMonth}
+                          type="button"
                           className={cn(
                             'aspect-square rounded-lg flex flex-col items-center justify-center text-xs transition-all p-0.5',
                             isCurrentMonth 
