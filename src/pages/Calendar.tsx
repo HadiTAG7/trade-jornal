@@ -209,8 +209,12 @@ export default function CalendarPage() {
                       return (
                         <button
                           key={dateStr}
-                          onClick={() => {
+                          onClick={(e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            console.log('Day clicked:', dateStr, 'isCurrentMonth:', isCurrentMonth);
                             if (isCurrentMonth) {
+                              console.log('Setting selected date to:', dateStr);
                               setSelectedDate(dateStr);
                             }
                           }}
