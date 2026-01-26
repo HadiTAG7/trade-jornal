@@ -270,7 +270,7 @@ export function DateInput({
               month={displayMonth}
               onMonthChange={setDisplayMonth}
               showOutsideDays
-              className="p-0"
+              className="p-0 pointer-events-auto"
               classNames={{
                 months: "flex flex-col sm:flex-row space-y-4 sm:space-x-4 sm:space-y-0",
                 month: "space-y-4",
