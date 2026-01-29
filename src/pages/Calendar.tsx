@@ -39,16 +39,25 @@ export default function CalendarPage() {
   const [loading, setLoading] = useState(true);
   const [selectedDate, setSelectedDate] = useState<string | null>(null);
 
+  // Fetch trades for the current year being viewed
   useEffect(() => {
     if (user) fetchTrades();
-  }, [user]);
+  }, [user, currentMonth]);
 
   const fetchTrades = async () => {
     try {
+      // Get the year from currentMonth to filter trades
+      const year = currentMonth.getFullYear();
+      const yearStart = `${year}-01-01T00:00:00`;
+      const yearEnd = `${year}-12-31T23:59:59`;
+      
       const { data, error } = await supabase
         .from('trades')
         .select('*')
-        .eq('user_id', user?.id);
+        .eq('user_id', user?.id)
+        .gte('exit_datetime', yearStart)
+        .lte('exit_datetime', yearEnd)
+        .order('exit_datetime', { ascending: false });
 
       if (error) throw error;
       
@@ -62,6 +71,7 @@ export default function CalendarPage() {
         stop_loss: t.stop_loss ? Number(t.stop_loss) : null,
       })) as Trade[];
       
+      console.log('Fetched trades for year', year, ':', typedTrades.length, 'trades');
       setTrades(typedTrades);
     } catch (error) {
       console.error('Error fetching trades:', error);
@@ -212,9 +222,7 @@ export default function CalendarPage() {
                           onClick={(e) => {
                             e.preventDefault();
                             e.stopPropagation();
-                            console.log('Day clicked:', dateStr, 'isCurrentMonth:', isCurrentMonth);
                             if (isCurrentMonth) {
-                              console.log('Setting selected date to:', dateStr);
                               setSelectedDate(dateStr);
                             }
                           }}
