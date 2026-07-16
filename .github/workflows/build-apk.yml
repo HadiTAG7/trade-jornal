@@ -12,6 +12,9 @@ on:
       - 'index.html'
       - '.github/workflows/build-apk.yml'
 
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -50,3 +53,18 @@ jobs:
           name: TradeLog-apk
           path: TradeLog.apk
           retention-days: 30
+
+      # Publish/update a rolling release so the APK has a stable, public,
+      # direct download URL:
+      # https://github.com/HadiTAG7/trade-jornal/releases/latest/download/TradeLog.apk
+      - name: Publish APK release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: apk-latest
+          name: TradeLog APK (latest build)
+          body: |
+            Latest Android APK built automatically from `${{ github.sha }}`.
+
+            **Direct download:** https://github.com/${{ github.repository }}/releases/latest/download/TradeLog.apk
+          files: TradeLog.apk
+          make_latest: true
