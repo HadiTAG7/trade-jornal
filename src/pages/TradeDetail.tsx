@@ -14,7 +14,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { supabase } from '@/integrations/supabase/client';
+import { fetchAll, fetchById, insertItem, updateItem } from '@/lib/db';
 import { useAuth } from '@/contexts/AuthContext';
 import { Trade, Strategy, Account, TradeSide } from '@/types/trade';
 import { toast } from 'sonner';
@@ -65,14 +65,8 @@ export default function TradeDetail() {
 
   const fetchTrade = async (tradeId: string) => {
     try {
-      const { data, error } = await supabase
-        .from('trades')
-        .select('*')
-        .eq('id', tradeId)
-        .eq('user_id', user?.id)
-        .maybeSingle();
+      const data = await fetchById<Trade>(user!.id, 'trades', tradeId);
 
-      if (error) throw error;
       if (!data) {
         toast.error('Trade not found');
         navigate(`/trades${referrerSearch}`);
@@ -106,19 +100,13 @@ export default function TradeDetail() {
   };
 
   const fetchStrategies = async () => {
-    const { data } = await supabase
-      .from('strategies')
-      .select('*')
-      .eq('user_id', user?.id);
-    setStrategies(data || []);
+    if (!user) return;
+    setStrategies(await fetchAll<Strategy>(user.id, 'strategies').catch(() => []));
   };
 
   const fetchAccounts = async () => {
-    const { data } = await supabase
-      .from('accounts')
-      .select('*')
-      .eq('user_id', user?.id);
-    setAccounts(data || []);
+    if (!user) return;
+    setAccounts(await fetchAll<Account>(user.id, 'accounts').catch(() => []));
   };
 
   const handleChange = (field: string, value: string) => {
@@ -156,16 +144,10 @@ export default function TradeDetail() {
       };
 
       if (isNew) {
-        const { error } = await supabase.from('trades').insert(tradeData);
-        if (error) throw error;
+        await insertItem(user.id, 'trades', tradeData);
         toast.success('Trade created');
       } else {
-        const { error } = await supabase
-          .from('trades')
-          .update(tradeData)
-          .eq('id', id)
-          .eq('user_id', user.id);
-        if (error) throw error;
+        await updateItem(user.id, 'trades', id!, tradeData);
         toast.success('Trade updated');
       }
 

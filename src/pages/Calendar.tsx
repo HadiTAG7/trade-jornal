@@ -4,7 +4,7 @@ import { MainLayout } from '@/components/layout/MainLayout';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { supabase } from '@/integrations/supabase/client';
+import { fetchTradesByExitRange } from '@/lib/db';
 import { useAuth } from '@/contexts/AuthContext';
 import { Trade, DailyStats } from '@/types/trade';
 import { calculateDailyStats, formatCurrency, formatR } from '@/lib/calculations';
@@ -51,17 +51,9 @@ export default function CalendarPage() {
       const yearStart = `${year}-01-01T00:00:00`;
       const yearEnd = `${year}-12-31T23:59:59`;
       
-      const { data, error } = await supabase
-        .from('trades')
-        .select('*')
-        .eq('user_id', user?.id)
-        .gte('exit_datetime', yearStart)
-        .lte('exit_datetime', yearEnd)
-        .order('exit_datetime', { ascending: false });
+      const data = await fetchTradesByExitRange<Trade>(user!.id, yearStart, yearEnd);
 
-      if (error) throw error;
-      
-      const typedTrades = (data || []).map(t => ({
+      const typedTrades = data.map(t => ({
         ...t,
         entry_price: Number(t.entry_price),
         exit_price: t.exit_price ? Number(t.exit_price) : null,

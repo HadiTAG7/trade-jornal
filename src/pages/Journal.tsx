@@ -8,7 +8,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { useToast } from '@/hooks/use-toast';
-import { supabase } from '@/integrations/supabase/client';
+import { fetchAll, getJournalEntry, upsertJournalEntry } from '@/lib/db';
 import { useAuth } from '@/contexts/AuthContext';
 import { JournalEntry, DailyStats, Trade } from '@/types/trade';
 import { calculateDailyStats, formatCurrency, formatR } from '@/lib/calculations';
@@ -35,14 +35,7 @@ export default function Journal() {
   const fetchJournalEntry = async () => {
     setLoading(true);
     try {
-      const { data, error } = await supabase
-        .from('journal_entries')
-        .select('*')
-        .eq('user_id', user?.id)
-        .eq('date', dateStr)
-        .maybeSingle();
-
-      if (error) throw error;
+      const data = await getJournalEntry<JournalEntry>(user!.id, dateStr);
       setJournalEntry(data || { date: dateStr });
     } catch (error) {
       console.error('Error fetching journal entry:', error);
@@ -53,14 +46,9 @@ export default function Journal() {
 
   const fetchTrades = async () => {
     try {
-      const { data, error } = await supabase
-        .from('trades')
-        .select('*')
-        .eq('user_id', user?.id);
+      const data = await fetchAll<Trade>(user!.id, 'trades');
 
-      if (error) throw error;
-      
-      const typedTrades = (data || []).map(t => ({
+      const typedTrades = data.map(t => ({
         ...t,
         entry_price: Number(t.entry_price),
         exit_price: t.exit_price ? Number(t.exit_price) : null,
@@ -82,8 +70,6 @@ export default function Journal() {
     setSaving(true);
     try {
       const entryData = {
-        user_id: user?.id,
-        date: dateStr,
         pre_market: journalEntry.pre_market || null,
         post_market: journalEntry.post_market || null,
         daily_max_loss: journalEntry.daily_max_loss || null,
@@ -91,11 +77,7 @@ export default function Journal() {
         mood: journalEntry.mood || null,
       };
 
-      const { error } = await supabase
-        .from('journal_entries')
-        .upsert(entryData, { onConflict: 'user_id,date' });
-
-      if (error) throw error;
+      await upsertJournalEntry(user!.id, dateStr, entryData);
 
       toast({
         title: 'Saved',

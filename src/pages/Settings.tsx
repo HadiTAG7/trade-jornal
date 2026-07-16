@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Plus, Trash2, Loader2, Save } from 'lucide-react';
+import { Plus, Trash2, Loader2, Save, Download } from 'lucide-react';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -7,9 +7,10 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useToast } from '@/hooks/use-toast';
-import { supabase } from '@/integrations/supabase/client';
+import { fetchAll as dbFetchAll, insertItem, deleteItem } from '@/lib/db';
 import { useAuth } from '@/contexts/AuthContext';
 import { Account, Strategy, Tag, Mistake } from '@/types/trade';
+import { exportAllData, downloadAsJson } from '@/lib/exportData';
 
 export default function Settings() {
   const { user } = useAuth();
@@ -21,6 +22,9 @@ export default function Settings() {
   const [mistakes, setMistakes] = useState<Mistake[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState<string | null>(null);
+
+  const [exporting, setExporting] = useState(false);
+  const [exportProgress, setExportProgress] = useState('');
 
   // New item forms
   const [newAccount, setNewAccount] = useState({ name: '', broker: '' });
@@ -39,95 +43,125 @@ export default function Settings() {
   };
 
   const fetchAccounts = async () => {
-    const { data } = await supabase.from('accounts').select('*').eq('user_id', user?.id).order('created_at');
-    setAccounts(data || []);
+    setAccounts(await dbFetchAll<Account>(user!.id, 'accounts', 'created_at').catch(() => []));
   };
 
   const fetchStrategies = async () => {
-    const { data } = await supabase.from('strategies').select('*').eq('user_id', user?.id).order('created_at');
-    setStrategies(data || []);
+    setStrategies(await dbFetchAll<Strategy>(user!.id, 'strategies', 'created_at').catch(() => []));
   };
 
   const fetchTags = async () => {
-    const { data } = await supabase.from('tags').select('*').eq('user_id', user?.id).order('created_at');
-    setTags(data || []);
+    setTags(await dbFetchAll<Tag>(user!.id, 'tags', 'created_at').catch(() => []));
   };
 
   const fetchMistakes = async () => {
-    const { data } = await supabase.from('mistakes').select('*').eq('user_id', user?.id).order('created_at');
-    setMistakes(data || []);
+    setMistakes(await dbFetchAll<Mistake>(user!.id, 'mistakes', 'created_at').catch(() => []));
+  };
+
+  const handleExportData = async () => {
+    if (!user) return;
+    setExporting(true);
+    try {
+      const data = await exportAllData(user.id, user.email ?? null, (table, done, total) => {
+        setExportProgress(table === 'done' ? '' : `Exporting ${table} (${done + 1}/${total})…`);
+      });
+      const date = new Date().toISOString().slice(0, 10);
+      downloadAsJson(data, `tradelog-export-${date}.json`);
+      const totalRows = Object.values(data.row_counts).reduce((a, b) => a + b, 0);
+      toast({
+        title: 'Export complete',
+        description: `${totalRows} rows exported across ${Object.keys(data.tables).length} tables.`,
+      });
+    } catch (error) {
+      toast({
+        title: 'Export failed',
+        description: error instanceof Error ? error.message : 'Unknown error',
+        variant: 'destructive',
+      });
+    } finally {
+      setExporting(false);
+      setExportProgress('');
+    }
   };
 
   // CRUD handlers
   const handleAddAccount = async () => {
     if (!newAccount.name) return;
     setSaving('account');
-    const { error } = await supabase.from('accounts').insert({ ...newAccount, user_id: user?.id });
-    if (!error) {
+    try {
+      await insertItem(user!.id, 'accounts', { ...newAccount });
       await fetchAccounts();
       setNewAccount({ name: '', broker: '' });
       toast({ title: 'Account added' });
+    } catch (error) {
+      console.error('Error adding account:', error);
     }
     setSaving(null);
   };
 
   const handleDeleteAccount = async (id: string) => {
     if (!confirm('Delete this account?')) return;
-    await supabase.from('accounts').delete().eq('id', id);
+    await deleteItem(user!.id, 'accounts', id);
     await fetchAccounts();
   };
 
   const handleAddStrategy = async () => {
     if (!newStrategy.name) return;
     setSaving('strategy');
-    const { error } = await supabase.from('strategies').insert({ ...newStrategy, user_id: user?.id });
-    if (!error) {
+    try {
+      await insertItem(user!.id, 'strategies', { ...newStrategy });
       await fetchStrategies();
       setNewStrategy({ name: '', description: '', color: '#6366f1' });
       toast({ title: 'Strategy added' });
+    } catch (error) {
+      console.error('Error adding strategy:', error);
     }
     setSaving(null);
   };
 
   const handleDeleteStrategy = async (id: string) => {
     if (!confirm('Delete this strategy?')) return;
-    await supabase.from('strategies').delete().eq('id', id);
+    await deleteItem(user!.id, 'strategies', id);
     await fetchStrategies();
   };
 
   const handleAddTag = async () => {
     if (!newTag.name) return;
     setSaving('tag');
-    const { error } = await supabase.from('tags').insert({ ...newTag, user_id: user?.id });
-    if (!error) {
+    try {
+      await insertItem(user!.id, 'tags', { ...newTag });
       await fetchTags();
       setNewTag({ name: '', color: '#0ea5e9' });
       toast({ title: 'Tag added' });
+    } catch (error) {
+      console.error('Error adding tag:', error);
     }
     setSaving(null);
   };
 
   const handleDeleteTag = async (id: string) => {
     if (!confirm('Delete this tag?')) return;
-    await supabase.from('tags').delete().eq('id', id);
+    await deleteItem(user!.id, 'tags', id);
     await fetchTags();
   };
 
   const handleAddMistake = async () => {
     if (!newMistake.name) return;
     setSaving('mistake');
-    const { error } = await supabase.from('mistakes').insert({ ...newMistake, user_id: user?.id });
-    if (!error) {
+    try {
+      await insertItem(user!.id, 'mistakes', { ...newMistake });
       await fetchMistakes();
       setNewMistake({ name: '', severity: 3 });
       toast({ title: 'Mistake type added' });
+    } catch (error) {
+      console.error('Error adding mistake:', error);
     }
     setSaving(null);
   };
 
   const handleDeleteMistake = async (id: string) => {
     if (!confirm('Delete this mistake type?')) return;
-    await supabase.from('mistakes').delete().eq('id', id);
+    await deleteItem(user!.id, 'mistakes', id);
     await fetchMistakes();
   };
 
@@ -155,6 +189,7 @@ export default function Settings() {
             <TabsTrigger value="strategies">Strategies</TabsTrigger>
             <TabsTrigger value="tags">Tags</TabsTrigger>
             <TabsTrigger value="mistakes">Mistakes</TabsTrigger>
+            <TabsTrigger value="data">Data</TabsTrigger>
           </TabsList>
 
           <TabsContent value="accounts">
@@ -366,6 +401,31 @@ export default function Settings() {
                     <p className="text-muted-foreground text-sm">No mistake types yet. Add your first one above.</p>
                   )}
                 </div>
+              </CardContent>
+            </Card>
+          </TabsContent>
+
+          <TabsContent value="data">
+            <Card>
+              <CardHeader>
+                <CardTitle>Export Data</CardTitle>
+                <CardDescription>
+                  Download all your data (trades, accounts, strategies, tags, journal entries and more)
+                  as a single JSON file. Use it as a backup or to migrate to another platform.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <Button onClick={handleExportData} disabled={exporting}>
+                  {exporting ? (
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  ) : (
+                    <Download className="h-4 w-4 mr-2" />
+                  )}
+                  {exporting ? 'Exporting…' : 'Export all data (JSON)'}
+                </Button>
+                {exportProgress && (
+                  <p className="text-muted-foreground text-sm">{exportProgress}</p>
+                )}
               </CardContent>
             </Card>
           </TabsContent>

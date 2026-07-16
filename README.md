@@ -1,73 +1,90 @@
-# Welcome to your Lovable project
+# TradeLog
 
-## Project info
+A trading journal app to track, analyze and improve your trades.
 
-**URL**: https://lovable.dev/projects/REPLACE_WITH_PROJECT_ID
+## Tech stack
 
-## How can I edit this code?
+- Vite + React + TypeScript
+- shadcn/ui + Tailwind CSS
+- Firebase (Authentication + Cloud Firestore)
+- TanStack Query, React Router, Recharts
 
-There are several ways of editing your application.
+## Local development
 
-**Use Lovable**
-
-Simply visit the [Lovable Project](https://lovable.dev/projects/REPLACE_WITH_PROJECT_ID) and start prompting.
-
-Changes made via Lovable will be committed automatically to this repo.
-
-**Use your preferred IDE**
-
-If you want to work locally using your own IDE, you can clone this repo and push changes. Pushed changes will also be reflected in Lovable.
-
-The only requirement is having Node.js & npm installed - [install with nvm](https://github.com/nvm-sh/nvm#installing-and-updating)
-
-Follow these steps:
+Requirements: Node.js 20+ and npm.
 
 ```sh
-# Step 1: Clone the repository using the project's Git URL.
-git clone <YOUR_GIT_URL>
-
-# Step 2: Navigate to the project directory.
-cd <YOUR_PROJECT_NAME>
-
-# Step 3: Install the necessary dependencies.
-npm i
-
-# Step 4: Start the development server with auto-reloading and an instant preview.
+npm install
 npm run dev
 ```
 
-**Edit a file directly in GitHub**
+The app runs at http://localhost:8080.
 
-- Navigate to the desired file(s).
-- Click the "Edit" button (pencil icon) at the top right of the file view.
-- Make your changes and commit the changes.
+### Environment variables
 
-**Use GitHub Codespaces**
+Create `.env` with your Firebase web app config (Firebase Console → Project
+settings → Your apps → Web app):
 
-- Navigate to the main page of your repository.
-- Click on the "Code" button (green button) near the top right.
-- Select the "Codespaces" tab.
-- Click on "New codespace" to launch a new Codespace environment.
-- Edit files directly within the Codespace and commit and push your changes once you're done.
+```sh
+VITE_FIREBASE_API_KEY="..."
+VITE_FIREBASE_AUTH_DOMAIN="<project-id>.firebaseapp.com"
+VITE_FIREBASE_PROJECT_ID="<project-id>"
+VITE_FIREBASE_STORAGE_BUCKET="<project-id>.appspot.com"
+VITE_FIREBASE_APP_ID="..."
+```
 
-## What technologies are used for this project?
+These are Vite build-time variables (inlined into the client bundle). The
+Firebase web config is safe to expose in the browser — access control is
+enforced by Firestore security rules.
 
-This project is built with:
+## Firebase setup (one time)
 
-- Vite
-- TypeScript
-- React
-- shadcn-ui
-- Tailwind CSS
+1. Create a project at https://console.firebase.google.com
+2. **Authentication** → Get started → enable **Email/Password**.
+3. **Firestore Database** → Create database (production mode).
+4. **Rules** tab → paste the contents of [`firestore.rules`](./firestore.rules) → Publish.
+5. Project settings → Your apps → add a **Web app** → copy the config into `.env`.
 
-## How can I deploy this project?
+### Data model
 
-Simply open [Lovable](https://lovable.dev/projects/REPLACE_WITH_PROJECT_ID) and click on Share -> Publish.
+All user data lives under `users/{uid}`:
 
-## Can I connect a custom domain to my Lovable project?
+```
+users/{uid}                     profile document
+users/{uid}/trades/{id}         trades (imported docs use stable_hash as id)
+users/{uid}/strategies/{id}
+users/{uid}/accounts/{id}
+users/{uid}/tags/{id}
+users/{uid}/mistakes/{id}
+users/{uid}/journal_entries/{yyyy-MM-dd}
+users/{uid}/imports/{id}
+```
 
-Yes, you can!
+## Migrating data from the old Supabase backend
 
-To connect a domain, navigate to Project > Settings > Domains and click Connect Domain.
+Export your data from the old app (Settings → Data → Export all data), then:
 
-Read more here: [Setting up a custom domain](https://docs.lovable.dev/features/custom-domain#custom-domain)
+```sh
+node scripts/migrate-to-firebase.mjs tradelog-export-YYYY-MM-DD.json you@email.com <password>
+```
+
+The script creates the Firebase Auth user if needed and writes everything to
+Firestore in batches. It is idempotent — re-running overwrites the same
+documents instead of duplicating them.
+
+## Deploying to Vercel
+
+1. Import this GitHub repository at https://vercel.com/new.
+2. Vercel auto-detects Vite (`vercel.json` sets build command, output dir and SPA rewrites).
+3. Add the five `VITE_FIREBASE_*` environment variables under Project → Settings → Environment Variables.
+4. Deploy.
+5. Add your Vercel domain to Firebase → Authentication → Settings → **Authorized domains**.
+
+## Scripts
+
+| Command | Description |
+| --- | --- |
+| `npm run dev` | Start dev server on port 8080 |
+| `npm run build` | Production build to `dist/` |
+| `npm run preview` | Preview the production build |
+| `npm run lint` | Run ESLint |

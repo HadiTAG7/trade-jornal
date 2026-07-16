@@ -2,9 +2,9 @@ import { useEffect, useState, useMemo } from 'react';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { supabase } from '@/integrations/supabase/client';
+import { fetchAll } from '@/lib/db';
 import { useAuth } from '@/contexts/AuthContext';
-import { Trade, AnalyticsData } from '@/types/trade';
+import { Trade, AnalyticsData, Strategy } from '@/types/trade';
 import { calculateAnalytics, calculateTradeMetrics, formatCurrency, formatPercent, formatR } from '@/lib/calculations';
 import {
   AreaChart,
@@ -36,16 +36,15 @@ export default function Analytics() {
   }, [user]);
 
   const fetchTrades = async () => {
+    if (!user) return;
     try {
-      const { data, error } = await supabase
-        .from('trades')
-        .select('*, strategies(*)')
-        .eq('user_id', user?.id)
-        .order('entry_datetime', { ascending: true });
+      const [data, allStrategies] = await Promise.all([
+        fetchAll<Trade>(user.id, 'trades', 'entry_datetime', 'asc'),
+        fetchAll<Strategy>(user.id, 'strategies'),
+      ]);
+      const strategiesById = Object.fromEntries(allStrategies.map(s => [s.id, s]));
 
-      if (error) throw error;
-      
-      const typedTrades = (data || []).map(t => ({
+      const typedTrades = data.map(t => ({
         ...t,
         entry_price: Number(t.entry_price),
         exit_price: t.exit_price ? Number(t.exit_price) : null,
@@ -53,9 +52,9 @@ export default function Analytics() {
         fees: Number(t.fees) || 0,
         commissions: Number(t.commissions) || 0,
         stop_loss: t.stop_loss ? Number(t.stop_loss) : null,
-        strategy: t.strategies,
+        strategy: t.strategy_id ? strategiesById[t.strategy_id] : undefined,
       })) as Trade[];
-      
+
       setTrades(typedTrades);
     } catch (error) {
       console.error('Error fetching trades:', error);

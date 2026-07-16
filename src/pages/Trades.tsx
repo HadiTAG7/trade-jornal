@@ -48,7 +48,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import { supabase } from '@/integrations/supabase/client';
+import { fetchAll, bulkUpdate, bulkDelete, deleteItem } from '@/lib/db';
 import { useAuth } from '@/contexts/AuthContext';
 import { useTradeFilters } from '@/hooks/useTradeFilters';
 import { Trade, Strategy, Account } from '@/types/trade';
@@ -118,36 +118,16 @@ export default function Trades() {
   }, [user]);
 
   const fetchTrades = async () => {
+    if (!user) return;
     try {
-      console.log('Fetching trades for user:', user?.id);
-      
-      // Fetch all trades using range-based pagination to overcome the 1000 row limit
-      let allTrades: any[] = [];
-      let from = 0;
-      const batchSize = 1000;
-      let hasMore = true;
-      
-      while (hasMore) {
-        const { data, error } = await supabase
-          .from('trades')
-          .select('*, strategies(*), accounts(*)')
-          .eq('user_id', user?.id)
-          .order('entry_datetime', { ascending: false })
-          .range(from, from + batchSize - 1);
+      const [allTrades, allStrategies, allAccounts] = await Promise.all([
+        fetchAll<Trade>(user.id, 'trades', 'entry_datetime', 'desc'),
+        fetchAll<Strategy>(user.id, 'strategies'),
+        fetchAll<Account>(user.id, 'accounts'),
+      ]);
+      const strategiesById = Object.fromEntries(allStrategies.map(s => [s.id, s]));
+      const accountsById = Object.fromEntries(allAccounts.map(a => [a.id, a]));
 
-        if (error) throw error;
-        
-        if (data && data.length > 0) {
-          allTrades = [...allTrades, ...data];
-          from += batchSize;
-          hasMore = data.length === batchSize;
-        } else {
-          hasMore = false;
-        }
-      }
-
-      console.log('Total trades fetched:', allTrades.length);
-      
       const typedTrades = allTrades.map(t => ({
         ...t,
         entry_price: Number(t.entry_price),
@@ -158,11 +138,10 @@ export default function Trades() {
         stop_loss: t.stop_loss ? Number(t.stop_loss) : null,
         planned_risk_override: t.planned_risk_override ? Number(t.planned_risk_override) : null,
         planned_r_override: t.planned_r_override ? Number(t.planned_r_override) : null,
-        strategy: t.strategies,
-        account: t.accounts,
+        strategy: t.strategy_id ? strategiesById[t.strategy_id] : undefined,
+        account: t.account_id ? accountsById[t.account_id] : undefined,
       })) as Trade[];
-      
-      console.log('Typed trades set:', typedTrades.length);
+
       setTrades(typedTrades);
     } catch (error) {
       console.error('Error fetching trades:', error);
@@ -172,19 +151,13 @@ export default function Trades() {
   };
 
   const fetchStrategies = async () => {
-    const { data } = await supabase
-      .from('strategies')
-      .select('*')
-      .eq('user_id', user?.id);
-    setStrategies(data || []);
+    if (!user) return;
+    setStrategies(await fetchAll<Strategy>(user.id, 'strategies').catch(() => []));
   };
 
   const fetchAccounts = async () => {
-    const { data } = await supabase
-      .from('accounts')
-      .select('*')
-      .eq('user_id', user?.id);
-    setAccounts(data || []);
+    if (!user) return;
+    setAccounts(await fetchAll<Account>(user.id, 'accounts').catch(() => []));
   };
 
   const filteredTrades = filterTrades(trades);
@@ -218,13 +191,10 @@ export default function Trades() {
     
     setBulkUpdating(true);
     try {
-      const { error } = await supabase
-        .from('trades')
-        .update({ strategy_id: bulkStrategyId === 'none' ? null : bulkStrategyId })
-        .in('id', Array.from(selectedTrades));
-      
-      if (error) throw error;
-      
+      await bulkUpdate(user!.id, 'trades', Array.from(selectedTrades), {
+        strategy_id: bulkStrategyId === 'none' ? null : bulkStrategyId,
+      });
+
       await fetchTrades();
       toast.success(`Updated strategy for ${selectedTrades.size} trade(s)`);
       setSelectedTrades(new Set());
@@ -257,13 +227,8 @@ export default function Trades() {
     
     setBulkUpdating(true);
     try {
-      const { error } = await supabase
-        .from('trades')
-        .update(updates)
-        .in('id', Array.from(selectedTrades));
-      
-      if (error) throw error;
-      
+      await bulkUpdate(user!.id, 'trades', Array.from(selectedTrades), updates);
+
       await fetchTrades();
       toast.success(`Updated risk for ${selectedTrades.size} trade(s)`);
       setSelectedTrades(new Set());
@@ -281,14 +246,16 @@ export default function Trades() {
   const handleDelete = async (id: string) => {
     if (!confirm('Are you sure you want to delete this trade?')) return;
     
-    const { error } = await supabase.from('trades').delete().eq('id', id);
-    if (!error) {
+    try {
+      await deleteItem(user!.id, 'trades', id);
       setTrades(trades.filter(t => t.id !== id));
       setSelectedTrades(prev => {
         const next = new Set(prev);
         next.delete(id);
         return next;
       });
+    } catch (error) {
+      console.error('Error deleting trade:', error);
     }
   };
 
@@ -318,13 +285,8 @@ export default function Trades() {
     
     setDeleting(true);
     try {
-      const { error } = await supabase
-        .from('trades')
-        .delete()
-        .in('id', Array.from(selectedTrades));
-      
-      if (error) throw error;
-      
+      await bulkDelete(user!.id, 'trades', Array.from(selectedTrades));
+
       setTrades(trades.filter(t => !selectedTrades.has(t.id)));
       toast.success(`Deleted ${selectedTrades.size} trade(s)`);
       setSelectedTrades(new Set());
