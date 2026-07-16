@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Plus, Trash2, Loader2, Save } from 'lucide-react';
+import { Plus, Trash2, Loader2, Save, Download } from 'lucide-react';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -10,6 +10,7 @@ import { useToast } from '@/hooks/use-toast';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
 import { Account, Strategy, Tag, Mistake } from '@/types/trade';
+import { exportAllData, downloadAsJson } from '@/lib/exportData';
 
 export default function Settings() {
   const { user } = useAuth();
@@ -21,6 +22,9 @@ export default function Settings() {
   const [mistakes, setMistakes] = useState<Mistake[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState<string | null>(null);
+
+  const [exporting, setExporting] = useState(false);
+  const [exportProgress, setExportProgress] = useState('');
 
   // New item forms
   const [newAccount, setNewAccount] = useState({ name: '', broker: '' });
@@ -56,6 +60,32 @@ export default function Settings() {
   const fetchMistakes = async () => {
     const { data } = await supabase.from('mistakes').select('*').eq('user_id', user?.id).order('created_at');
     setMistakes(data || []);
+  };
+
+  const handleExportData = async () => {
+    if (!user) return;
+    setExporting(true);
+    try {
+      const data = await exportAllData(user.id, user.email ?? null, (table, done, total) => {
+        setExportProgress(table === 'done' ? '' : `Exporting ${table} (${done + 1}/${total})…`);
+      });
+      const date = new Date().toISOString().slice(0, 10);
+      downloadAsJson(data, `tradelog-export-${date}.json`);
+      const totalRows = Object.values(data.row_counts).reduce((a, b) => a + b, 0);
+      toast({
+        title: 'Export complete',
+        description: `${totalRows} rows exported across ${Object.keys(data.tables).length} tables.`,
+      });
+    } catch (error) {
+      toast({
+        title: 'Export failed',
+        description: error instanceof Error ? error.message : 'Unknown error',
+        variant: 'destructive',
+      });
+    } finally {
+      setExporting(false);
+      setExportProgress('');
+    }
   };
 
   // CRUD handlers
@@ -155,6 +185,7 @@ export default function Settings() {
             <TabsTrigger value="strategies">Strategies</TabsTrigger>
             <TabsTrigger value="tags">Tags</TabsTrigger>
             <TabsTrigger value="mistakes">Mistakes</TabsTrigger>
+            <TabsTrigger value="data">Data</TabsTrigger>
           </TabsList>
 
           <TabsContent value="accounts">
@@ -366,6 +397,31 @@ export default function Settings() {
                     <p className="text-muted-foreground text-sm">No mistake types yet. Add your first one above.</p>
                   )}
                 </div>
+              </CardContent>
+            </Card>
+          </TabsContent>
+
+          <TabsContent value="data">
+            <Card>
+              <CardHeader>
+                <CardTitle>Export Data</CardTitle>
+                <CardDescription>
+                  Download all your data (trades, accounts, strategies, tags, journal entries and more)
+                  as a single JSON file. Use it as a backup or to migrate to another platform.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <Button onClick={handleExportData} disabled={exporting}>
+                  {exporting ? (
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  ) : (
+                    <Download className="h-4 w-4 mr-2" />
+                  )}
+                  {exporting ? 'Exporting…' : 'Export all data (JSON)'}
+                </Button>
+                {exportProgress && (
+                  <p className="text-muted-foreground text-sm">{exportProgress}</p>
+                )}
               </CardContent>
             </Card>
           </TabsContent>
