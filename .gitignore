@@ -25,3 +25,13 @@ dist-ssr
 .vercel
 .env*
 !.env.example
+
+# Android / Capacitor
+android/.gradle
+android/build
+android/app/build
+android/local.properties
+android/.idea
+android/app/src/main/assets/public
+android/app/src/main/assets/capacitor.config.json
+*.apk
