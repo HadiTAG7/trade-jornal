@@ -1,73 +1,65 @@
-# Welcome to your Lovable project
+# TradeLog
 
-## Project info
+A trading journal app to track, analyze and improve your trades.
 
-**URL**: https://lovable.dev/projects/REPLACE_WITH_PROJECT_ID
+## Tech stack
 
-## How can I edit this code?
+- Vite + React + TypeScript
+- shadcn/ui + Tailwind CSS
+- Supabase (auth + database)
+- TanStack Query, React Router, Recharts
 
-There are several ways of editing your application.
+## Local development
 
-**Use Lovable**
-
-Simply visit the [Lovable Project](https://lovable.dev/projects/REPLACE_WITH_PROJECT_ID) and start prompting.
-
-Changes made via Lovable will be committed automatically to this repo.
-
-**Use your preferred IDE**
-
-If you want to work locally using your own IDE, you can clone this repo and push changes. Pushed changes will also be reflected in Lovable.
-
-The only requirement is having Node.js & npm installed - [install with nvm](https://github.com/nvm-sh/nvm#installing-and-updating)
-
-Follow these steps:
+Requirements: Node.js 20+ and npm.
 
 ```sh
-# Step 1: Clone the repository using the project's Git URL.
-git clone <YOUR_GIT_URL>
-
-# Step 2: Navigate to the project directory.
-cd <YOUR_PROJECT_NAME>
-
-# Step 3: Install the necessary dependencies.
-npm i
-
-# Step 4: Start the development server with auto-reloading and an instant preview.
+npm install
 npm run dev
 ```
 
-**Edit a file directly in GitHub**
+The app runs at http://localhost:8080.
 
-- Navigate to the desired file(s).
-- Click the "Edit" button (pencil icon) at the top right of the file view.
-- Make your changes and commit the changes.
+### Environment variables
 
-**Use GitHub Codespaces**
+Copy `.env` (or create it) with your Supabase project values:
 
-- Navigate to the main page of your repository.
-- Click on the "Code" button (green button) near the top right.
-- Select the "Codespaces" tab.
-- Click on "New codespace" to launch a new Codespace environment.
-- Edit files directly within the Codespace and commit and push your changes once you're done.
+```sh
+VITE_SUPABASE_URL="https://<project-id>.supabase.co"
+VITE_SUPABASE_PUBLISHABLE_KEY="<anon-public-key>"
+VITE_SUPABASE_PROJECT_ID="<project-id>"
+```
 
-## What technologies are used for this project?
+These are Vite build-time variables (inlined into the client bundle). The
+publishable/anon key is safe to expose in the browser.
 
-This project is built with:
+## Deploying to Vercel
 
-- Vite
-- TypeScript
-- React
-- shadcn-ui
-- Tailwind CSS
+1. Import this GitHub repository at https://vercel.com/new.
+2. Vercel auto-detects Vite. Build command: `npm run build`, output directory: `dist` (already configured in `vercel.json`).
+3. Add the three `VITE_SUPABASE_*` environment variables under Project → Settings → Environment Variables.
+4. Deploy. Client-side routing is handled by the rewrite rule in `vercel.json`.
 
-## How can I deploy this project?
+### Supabase auth redirect
 
-Simply open [Lovable](https://lovable.dev/projects/REPLACE_WITH_PROJECT_ID) and click on Share -> Publish.
+After the first deploy, add your Vercel domain (e.g. `https://<project>.vercel.app`)
+to Supabase → Authentication → URL Configuration (Site URL / Redirect URLs) so
+email confirmation links point to the deployed app.
 
-## Can I connect a custom domain to my Lovable project?
+## Scripts
 
-Yes, you can!
+| Command | Description |
+| --- | --- |
+| `npm run dev` | Start dev server on port 8080 |
+| `npm run build` | Production build to `dist/` |
+| `npm run preview` | Preview the production build |
+| `npm run lint` | Run ESLint |
 
-To connect a domain, navigate to Project > Settings > Domains and click Connect Domain.
+## Database
 
-Read more here: [Setting up a custom domain](https://docs.lovable.dev/features/custom-domain#custom-domain)
+Supabase migrations live in `supabase/migrations/`. Apply them with the
+[Supabase CLI](https://supabase.com/docs/guides/cli):
+
+```sh
+supabase db push
+```
