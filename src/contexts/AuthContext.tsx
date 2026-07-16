@@ -102,6 +102,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       });
       return { error: null };
     } catch (err) {
+      // If this domain isn't in Firebase's authorized list, send the email
+      // without a continue URL (Firebase's hosted reset page still works).
+      if ((err as { code?: string })?.code === 'auth/unauthorized-continue-uri') {
+        try {
+          await sendPasswordResetEmail(auth, email);
+          return { error: null };
+        } catch (retryErr) {
+          return { error: friendlyError(retryErr) };
+        }
+      }
       return { error: friendlyError(err) };
     }
   };
