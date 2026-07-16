@@ -18,7 +18,7 @@ import { TradeBadge, PnLBadge } from '@/components/ui/trade-badge';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { TradeFiltersComponent } from '@/components/TradeFilters';
-import { supabase } from '@/integrations/supabase/client';
+import { fetchAll } from '@/lib/db';
 import { useAuth } from '@/contexts/AuthContext';
 import { useTradeFilters } from '@/hooks/useTradeFilters';
 import { Trade, AnalyticsData, Strategy } from '@/types/trade';
@@ -94,32 +94,14 @@ export default function Dashboard() {
   }, [user]);
 
   const fetchTrades = async () => {
+    if (!user) return;
     try {
-      // Fetch all trades using range-based pagination to overcome the 1000 row limit
-      let allTrades: any[] = [];
-      let from = 0;
-      const batchSize = 1000;
-      let hasMore = true;
-      
-      while (hasMore) {
-        const { data, error } = await supabase
-          .from('trades')
-          .select('*, strategies(*)')
-          .eq('user_id', user?.id)
-          .order('entry_datetime', { ascending: false })
-          .range(from, from + batchSize - 1);
+      const [allTrades, allStrategies] = await Promise.all([
+        fetchAll<Trade>(user.id, 'trades', 'entry_datetime', 'desc'),
+        fetchAll<Strategy>(user.id, 'strategies'),
+      ]);
+      const strategiesById = Object.fromEntries(allStrategies.map(s => [s.id, s]));
 
-        if (error) throw error;
-        
-        if (data && data.length > 0) {
-          allTrades = [...allTrades, ...data];
-          from += batchSize;
-          hasMore = data.length === batchSize;
-        } else {
-          hasMore = false;
-        }
-      }
-      
       const typedTrades = allTrades.map(t => ({
         ...t,
         entry_price: Number(t.entry_price),
@@ -132,9 +114,9 @@ export default function Dashboard() {
         planned_r_override: t.planned_r_override ? Number(t.planned_r_override) : null,
         mae: t.mae ? Number(t.mae) : null,
         mfe: t.mfe ? Number(t.mfe) : null,
-        strategy: t.strategies,
+        strategy: t.strategy_id ? strategiesById[t.strategy_id] : undefined,
       })) as Trade[];
-      
+
       setTrades(typedTrades);
     } catch (error) {
       console.error('Error fetching trades:', error);
@@ -144,11 +126,8 @@ export default function Dashboard() {
   };
 
   const fetchStrategies = async () => {
-    const { data } = await supabase
-      .from('strategies')
-      .select('*')
-      .eq('user_id', user?.id);
-    setStrategies(data || []);
+    if (!user) return;
+    setStrategies(await fetchAll<Strategy>(user.id, 'strategies').catch(() => []));
   };
 
   // Apply filters to trades and recalculate analytics

@@ -7,7 +7,7 @@ import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useToast } from '@/hooks/use-toast';
-import { supabase } from '@/integrations/supabase/client';
+import { fetchAll, importTradesByHash, insertItem } from '@/lib/db';
 import { useAuth } from '@/contexts/AuthContext';
 import { generateStableHash } from '@/lib/calculations';
 import { parseTOSAccountStatement, TIMEZONE_OPTIONS, ReconstructedTrade, TOSParseResult } from '@/lib/tosAccountStatementParser';
@@ -265,12 +265,9 @@ export default function Import() {
     }));
 
     // Check for duplicates
-    const { data: existingTrades } = await supabase
-      .from('trades')
-      .select('stable_hash')
-      .eq('user_id', user?.id);
+    const existingTrades = await fetchAll<{ stable_hash: string | null }>(user!.id, 'trades');
 
-    const existingHashes = new Set((existingTrades || []).map(t => t.stable_hash));
+    const existingHashes = new Set(existingTrades.map(t => t.stable_hash));
     
     trades.forEach(trade => {
       trade.isDuplicate = existingHashes.has(trade.stable_hash);
@@ -403,12 +400,9 @@ export default function Import() {
     }
 
     // Check for duplicates
-    const { data: existingTrades } = await supabase
-      .from('trades')
-      .select('stable_hash')
-      .eq('user_id', user?.id);
+    const existingTrades = await fetchAll<{ stable_hash: string | null }>(user!.id, 'trades');
 
-    const existingHashes = new Set((existingTrades || []).map(t => t.stable_hash));
+    const existingHashes = new Set(existingTrades.map(t => t.stable_hash));
     
     trades.forEach(trade => {
       trade.isDuplicate = existingHashes.has(trade.stable_hash);
@@ -427,7 +421,6 @@ export default function Import() {
       
       if (newTrades.length > 0) {
         const tradesToInsert = newTrades.map(t => ({
-          user_id: user?.id,
           symbol: t.symbol,
           side: t.side,
           entry_datetime: t.entry_datetime,
@@ -445,24 +438,14 @@ export default function Import() {
           source: source === 'ThinkOrSwim-AccountStatement' ? 'ThinkOrSwim' : source,
         }));
 
-        // Use upsert with onConflict to skip duplicates gracefully
-        const { data, error } = await supabase
-          .from('trades')
-          .upsert(tradesToInsert, { 
-            onConflict: 'user_id,stable_hash',
-            ignoreDuplicates: true 
-          })
-          .select('id');
-        
-        if (error) throw error;
-        actuallyImported = data?.length || 0;
+        // stable_hash is the document ID, so duplicates are impossible
+        actuallyImported = await importTradesByHash(user!.id, tradesToInsert);
       }
 
       // Log the import - use 'ThinkOrSwim' for account statement imports
       const sourceToLog = source === 'ThinkOrSwim-AccountStatement' ? 'ThinkOrSwim' : source;
-      await supabase.from('imports').insert({
-        user_id: user?.id,
-        source_name: sourceToLog as 'ThinkOrSwim' | 'TraderVue' | 'Custom',
+      await insertItem(user!.id, 'imports', {
+        source_name: sourceToLog,
         filename: file?.name || 'unknown',
         rows_total: parsedTrades.length,
         rows_new: actuallyImported,

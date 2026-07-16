@@ -1,10 +1,25 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
-import { User, Session } from '@supabase/supabase-js';
-import { supabase } from '@/integrations/supabase/client';
+import {
+  createUserWithEmailAndPassword,
+  onAuthStateChanged,
+  sendPasswordResetEmail,
+  signInWithEmailAndPassword,
+  signOut as firebaseSignOut,
+  updatePassword as firebaseUpdatePassword,
+  User as FirebaseUser,
+} from 'firebase/auth';
+import { doc, setDoc } from 'firebase/firestore';
+import { auth, db } from '@/integrations/firebase/client';
+
+// Minimal user shape the app relies on (kept compatible with the previous
+// Supabase user: `id` and `email`).
+export interface AppUser {
+  id: string;
+  email: string | null;
+}
 
 interface AuthContextType {
-  user: User | null;
-  session: Session | null;
+  user: AppUser | null;
   loading: boolean;
   passwordRecovery: boolean;
   signIn: (email: string, password: string) => Promise<{ error: Error | null }>;
@@ -17,66 +32,88 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
+function toAppUser(u: FirebaseUser | null): AppUser | null {
+  return u ? { id: u.uid, email: u.email } : null;
+}
+
+function friendlyError(err: unknown): Error {
+  const code = (err as { code?: string })?.code ?? '';
+  const map: Record<string, string> = {
+    'auth/invalid-credential': 'Invalid email or password.',
+    'auth/wrong-password': 'Invalid email or password.',
+    'auth/user-not-found': 'No account found with this email.',
+    'auth/email-already-in-use': 'An account with this email already registered.',
+    'auth/weak-password': 'Password must be at least 6 characters.',
+    'auth/too-many-requests': 'Too many attempts. Please wait a moment and try again.',
+    'auth/network-request-failed': 'NetworkError: unable to connect.',
+  };
+  return new Error(map[code] ?? (err instanceof Error ? err.message : String(err)));
+}
+
 export function AuthProvider({ children }: { children: React.ReactNode }) {
-  const [user, setUser] = useState<User | null>(null);
-  const [session, setSession] = useState<Session | null>(null);
+  const [user, setUser] = useState<AppUser | null>(null);
   const [loading, setLoading] = useState(true);
   const [passwordRecovery, setPasswordRecovery] = useState(false);
 
   useEffect(() => {
-    // Set up auth state listener FIRST
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      (event, session) => {
-        if (event === 'PASSWORD_RECOVERY') {
-          setPasswordRecovery(true);
-        }
-        setSession(session);
-        setUser(session?.user ?? null);
-        setLoading(false);
-      }
-    );
-
-    // THEN check for existing session
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setSession(session);
-      setUser(session?.user ?? null);
+    const unsubscribe = onAuthStateChanged(auth, (fbUser) => {
+      setUser(toAppUser(fbUser));
       setLoading(false);
     });
-
-    return () => subscription.unsubscribe();
+    return () => unsubscribe();
   }, []);
 
   const signIn = async (email: string, password: string) => {
-    const { error } = await supabase.auth.signInWithPassword({ email, password });
-    return { error: error as Error | null };
+    try {
+      await signInWithEmailAndPassword(auth, email, password);
+      return { error: null };
+    } catch (err) {
+      return { error: friendlyError(err) };
+    }
   };
 
   const signUp = async (email: string, password: string) => {
-    const redirectUrl = `${window.location.origin}/`;
-    const { error } = await supabase.auth.signUp({
-      email,
-      password,
-      options: {
-        emailRedirectTo: redirectUrl
-      }
-    });
-    return { error: error as Error | null };
+    try {
+      const cred = await createUserWithEmailAndPassword(auth, email, password);
+      // Seed the user's profile document.
+      await setDoc(
+        doc(db, 'users', cred.user.uid),
+        {
+          user_id: cred.user.uid,
+          email,
+          created_at: new Date().toISOString(),
+        },
+        { merge: true },
+      );
+      return { error: null };
+    } catch (err) {
+      return { error: friendlyError(err) };
+    }
   };
 
   const signOut = async () => {
-    await supabase.auth.signOut();
+    await firebaseSignOut(auth);
   };
 
   const resetPassword = async (email: string) => {
-    const { error } = await supabase.auth.resetPasswordForEmail(email, {
-      redirectTo: `${window.location.origin}/auth?mode=update-password`,
-    });
-    return { error: error as Error | null };
+    try {
+      await sendPasswordResetEmail(auth, email, {
+        url: `${window.location.origin}/auth`,
+      });
+      return { error: null };
+    } catch (err) {
+      return { error: friendlyError(err) };
+    }
   };
 
   const updatePassword = async (password: string) => {
-    const { error } = await supabase.auth.updateUser({ password });
-    return { error: error as Error | null };
+    try {
+      if (!auth.currentUser) throw new Error('You must be signed in to change your password.');
+      await firebaseUpdatePassword(auth.currentUser, password);
+      return { error: null };
+    } catch (err) {
+      return { error: friendlyError(err) };
+    }
   };
 
   const clearPasswordRecovery = () => setPasswordRecovery(false);
@@ -85,7 +122,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     <AuthContext.Provider
       value={{
         user,
-        session,
         loading,
         passwordRecovery,
         signIn,

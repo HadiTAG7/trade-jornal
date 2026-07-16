@@ -6,7 +6,7 @@ A trading journal app to track, analyze and improve your trades.
 
 - Vite + React + TypeScript
 - shadcn/ui + Tailwind CSS
-- Supabase (auth + database)
+- Firebase (Authentication + Cloud Firestore)
 - TanStack Query, React Router, Recharts
 
 ## Local development
@@ -22,29 +22,63 @@ The app runs at http://localhost:8080.
 
 ### Environment variables
 
-Copy `.env` (or create it) with your Supabase project values:
+Create `.env` with your Firebase web app config (Firebase Console → Project
+settings → Your apps → Web app):
 
 ```sh
-VITE_SUPABASE_URL="https://<project-id>.supabase.co"
-VITE_SUPABASE_PUBLISHABLE_KEY="<anon-public-key>"
-VITE_SUPABASE_PROJECT_ID="<project-id>"
+VITE_FIREBASE_API_KEY="..."
+VITE_FIREBASE_AUTH_DOMAIN="<project-id>.firebaseapp.com"
+VITE_FIREBASE_PROJECT_ID="<project-id>"
+VITE_FIREBASE_STORAGE_BUCKET="<project-id>.appspot.com"
+VITE_FIREBASE_APP_ID="..."
 ```
 
 These are Vite build-time variables (inlined into the client bundle). The
-publishable/anon key is safe to expose in the browser.
+Firebase web config is safe to expose in the browser — access control is
+enforced by Firestore security rules.
+
+## Firebase setup (one time)
+
+1. Create a project at https://console.firebase.google.com
+2. **Authentication** → Get started → enable **Email/Password**.
+3. **Firestore Database** → Create database (production mode).
+4. **Rules** tab → paste the contents of [`firestore.rules`](./firestore.rules) → Publish.
+5. Project settings → Your apps → add a **Web app** → copy the config into `.env`.
+
+### Data model
+
+All user data lives under `users/{uid}`:
+
+```
+users/{uid}                     profile document
+users/{uid}/trades/{id}         trades (imported docs use stable_hash as id)
+users/{uid}/strategies/{id}
+users/{uid}/accounts/{id}
+users/{uid}/tags/{id}
+users/{uid}/mistakes/{id}
+users/{uid}/journal_entries/{yyyy-MM-dd}
+users/{uid}/imports/{id}
+```
+
+## Migrating data from the old Supabase backend
+
+Export your data from the old app (Settings → Data → Export all data), then:
+
+```sh
+node scripts/migrate-to-firebase.mjs tradelog-export-YYYY-MM-DD.json you@email.com <password>
+```
+
+The script creates the Firebase Auth user if needed and writes everything to
+Firestore in batches. It is idempotent — re-running overwrites the same
+documents instead of duplicating them.
 
 ## Deploying to Vercel
 
 1. Import this GitHub repository at https://vercel.com/new.
-2. Vercel auto-detects Vite. Build command: `npm run build`, output directory: `dist` (already configured in `vercel.json`).
-3. Add the three `VITE_SUPABASE_*` environment variables under Project → Settings → Environment Variables.
-4. Deploy. Client-side routing is handled by the rewrite rule in `vercel.json`.
-
-### Supabase auth redirect
-
-After the first deploy, add your Vercel domain (e.g. `https://<project>.vercel.app`)
-to Supabase → Authentication → URL Configuration (Site URL / Redirect URLs) so
-email confirmation links point to the deployed app.
+2. Vercel auto-detects Vite (`vercel.json` sets build command, output dir and SPA rewrites).
+3. Add the five `VITE_FIREBASE_*` environment variables under Project → Settings → Environment Variables.
+4. Deploy.
+5. Add your Vercel domain to Firebase → Authentication → Settings → **Authorized domains**.
 
 ## Scripts
 
@@ -54,12 +88,3 @@ email confirmation links point to the deployed app.
 | `npm run build` | Production build to `dist/` |
 | `npm run preview` | Preview the production build |
 | `npm run lint` | Run ESLint |
-
-## Database
-
-Supabase migrations live in `supabase/migrations/`. Apply them with the
-[Supabase CLI](https://supabase.com/docs/guides/cli):
-
-```sh
-supabase db push
-```

@@ -1,55 +1,28 @@
-import { supabase } from '@/integrations/supabase/client';
+import { doc, getDoc } from 'firebase/firestore';
+import { db } from '@/integrations/firebase/client';
+import { fetchAll } from '@/lib/db';
 
-// Every table in the database, with a stable column to paginate on.
-// RLS scopes all reads to the signed-in user, so a plain select returns
-// only the current user's rows.
-const TABLES: { name: string; orderBy: string }[] = [
-  { name: 'profiles', orderBy: 'id' },
-  { name: 'accounts', orderBy: 'id' },
-  { name: 'strategies', orderBy: 'id' },
-  { name: 'tags', orderBy: 'id' },
-  { name: 'mistakes', orderBy: 'id' },
-  { name: 'trades', orderBy: 'id' },
-  { name: 'trade_targets', orderBy: 'id' },
-  { name: 'trade_tags', orderBy: 'trade_id' },
-  { name: 'trade_mistakes', orderBy: 'trade_id' },
-  { name: 'attachments', orderBy: 'id' },
-  { name: 'checklist_templates', orderBy: 'id' },
-  { name: 'checklist_items', orderBy: 'id' },
-  { name: 'trade_checklist_responses', orderBy: 'id' },
-  { name: 'journal_entries', orderBy: 'id' },
-  { name: 'import_mapping_templates', orderBy: 'id' },
-  { name: 'imports', orderBy: 'id' },
-  { name: 'reports', orderBy: 'id' },
-  { name: 'filter_presets', orderBy: 'id' },
-];
-
-const PAGE_SIZE = 1000;
+// Every user collection in Firestore. Reads are structurally scoped to the
+// signed-in user because data lives under users/{uid}/.
+const COLLECTIONS = [
+  'accounts',
+  'strategies',
+  'tags',
+  'mistakes',
+  'trades',
+  'journal_entries',
+  'imports',
+] as const;
 
 export interface DataExport {
   format: 'tradelog-export';
-  version: 1;
+  version: 2;
   exported_at: string;
   user_id: string;
   user_email: string | null;
-  source: { provider: 'supabase'; project_id: string | undefined };
+  source: { provider: 'firebase'; project_id: string | undefined };
   row_counts: Record<string, number>;
   tables: Record<string, unknown[]>;
-}
-
-async function fetchAllRows(table: string, orderBy: string): Promise<unknown[]> {
-  const rows: unknown[] = [];
-  for (let from = 0; ; from += PAGE_SIZE) {
-    const { data, error } = await supabase
-      .from(table as never)
-      .select('*')
-      .order(orderBy as never, { ascending: true })
-      .range(from, from + PAGE_SIZE - 1);
-    if (error) throw new Error(`Failed to export "${table}": ${error.message}`);
-    rows.push(...((data as unknown[]) ?? []));
-    if (!data || data.length < PAGE_SIZE) break;
-  }
-  return rows;
 }
 
 export async function exportAllData(
@@ -59,25 +32,32 @@ export async function exportAllData(
 ): Promise<DataExport> {
   const tables: Record<string, unknown[]> = {};
   const rowCounts: Record<string, number> = {};
+  const total = COLLECTIONS.length + 1;
 
-  for (let i = 0; i < TABLES.length; i++) {
-    const { name, orderBy } = TABLES[i];
-    onProgress?.(name, i, TABLES.length);
-    const rows = await fetchAllRows(name, orderBy);
+  // Profile document
+  onProgress?.('profile', 0, total);
+  const profileSnap = await getDoc(doc(db, 'users', userId));
+  tables['profiles'] = profileSnap.exists() ? [{ id: profileSnap.id, ...profileSnap.data() }] : [];
+  rowCounts['profiles'] = tables['profiles'].length;
+
+  for (let i = 0; i < COLLECTIONS.length; i++) {
+    const name = COLLECTIONS[i];
+    onProgress?.(name, i + 1, total);
+    const rows = await fetchAll<unknown>(userId, name);
     tables[name] = rows;
     rowCounts[name] = rows.length;
   }
-  onProgress?.('done', TABLES.length, TABLES.length);
+  onProgress?.('done', total, total);
 
   return {
     format: 'tradelog-export',
-    version: 1,
+    version: 2,
     exported_at: new Date().toISOString(),
     user_id: userId,
     user_email: userEmail,
     source: {
-      provider: 'supabase',
-      project_id: import.meta.env.VITE_SUPABASE_PROJECT_ID,
+      provider: 'firebase',
+      project_id: import.meta.env.VITE_FIREBASE_PROJECT_ID,
     },
     row_counts: rowCounts,
     tables,
