@@ -7,6 +7,7 @@
     "dev": "vite",
     "build": "vite build",
     "build:dev": "vite build --mode development",
+    "apk": "vite build && cap sync android && cd android && ./gradlew assembleDebug && echo 'APK: android/app/build/outputs/apk/debug/app-debug.apk'",
     "lint": "eslint .",
     "preview": "vite preview"
   },
