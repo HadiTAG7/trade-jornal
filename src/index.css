@@ -4,6 +4,26 @@
 @tailwind components;
 @tailwind utilities;
 
+/*
+ * Edge-to-edge / foldable safe areas (Android 15+ forces edge-to-edge, and
+ * the Galaxy Z Fold's inner display has a camera cutout + rounded corners).
+ * The sticky header clears the status bar / camera; page content clears the
+ * side cutouts and the bottom gesture bar.
+ */
+@layer base {
+  .app-safe-header {
+    padding-top: env(safe-area-inset-top, 0px);
+    padding-left: env(safe-area-inset-left, 0px);
+    padding-right: env(safe-area-inset-right, 0px);
+  }
+
+  .app-safe-body {
+    padding-left: env(safe-area-inset-left, 0px);
+    padding-right: env(safe-area-inset-right, 0px);
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+}
+
 @layer base {
   :root {
     /* Light mode - Clean finance aesthetic */
