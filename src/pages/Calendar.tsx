@@ -8,6 +8,7 @@ import { fetchTradesByExitRange } from '@/lib/db';
 import { useAuth } from '@/contexts/AuthContext';
 import { Trade, DailyStats } from '@/types/trade';
 import { calculateDailyStats, formatCurrency, formatR } from '@/lib/calculations';
+import { syncWidgetData } from '@/lib/widgetData';
 import { format, startOfMonth, endOfMonth, eachDayOfInterval, addMonths, subMonths, setYear, getYear, isSameMonth, isToday, startOfYear, endOfYear, eachMonthOfInterval, startOfWeek, endOfWeek } from 'date-fns';
 import { cn } from '@/lib/utils';
 
@@ -65,6 +66,7 @@ export default function CalendarPage() {
       
       console.log('Fetched trades for year', year, ':', typedTrades.length, 'trades');
       setTrades(typedTrades);
+      syncWidgetData(typedTrades);
     } catch (error) {
       console.error('Error fetching trades:', error);
     } finally {

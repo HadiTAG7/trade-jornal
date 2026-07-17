@@ -19,6 +19,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Button } from '@/components/ui/button';
 import { TradeFiltersComponent } from '@/components/TradeFilters';
 import { fetchAll } from '@/lib/db';
+import { syncWidgetData } from '@/lib/widgetData';
 import { useAuth } from '@/contexts/AuthContext';
 import { useTradeFilters } from '@/hooks/useTradeFilters';
 import { Trade, AnalyticsData, Strategy } from '@/types/trade';
@@ -118,6 +119,7 @@ export default function Dashboard() {
       })) as Trade[];
 
       setTrades(typedTrades);
+      syncWidgetData(typedTrades);
     } catch (error) {
       console.error('Error fetching trades:', error);
     } finally {
