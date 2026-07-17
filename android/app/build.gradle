@@ -3,6 +3,19 @@ apply plugin: 'com.android.application'
 android {
     namespace = "com.tradelog.app"
     compileSdk = rootProject.ext.compileSdkVersion
+    // Stable signing key so every build shares one signature and updates
+    // install cleanly. Used only when the keystore file is present locally.
+    def tradelogKeystore = file('tradelog-release.keystore')
+    signingConfigs {
+        if (tradelogKeystore.exists()) {
+            tradelog {
+                storeFile tradelogKeystore
+                storePassword 'tradelog2026'
+                keyAlias 'tradelog'
+                keyPassword 'tradelog2026'
+            }
+        }
+    }
     defaultConfig {
         applicationId "com.tradelog.app"
         minSdkVersion rootProject.ext.minSdkVersion
@@ -17,6 +30,9 @@ android {
         }
     }
     buildTypes {
+        debug {
+            signingConfig signingConfigs.tradelog
+        }
         release {
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
