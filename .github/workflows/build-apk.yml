@@ -61,10 +61,13 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: apk-latest
-          name: TradeLog APK (latest build)
+          name: TradeLog — تطبيق أندرويد (v1.0.${{ github.run_number }})
           body: |
-            Latest Android APK built automatically from `${{ github.sha }}`.
+            أحدث نسخة APK من TradeLog. نزّلها على الجوال وثبّتها مباشرة.
 
-            **Direct download:** https://github.com/${{ github.repository }}/releases/latest/download/TradeLog.apk
+            **رابط التنزيل المباشر:**
+            https://github.com/${{ github.repository }}/releases/latest/download/TradeLog.apk
+
+            مبنية تلقائيًا من `${{ github.sha }}`
           files: TradeLog.apk
           make_latest: true
