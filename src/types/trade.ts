@@ -23,6 +23,10 @@ export interface Trade {
   stop_loss: number | null;
   planned_risk_override: number | null;
   planned_r_override: number | null;
+  // Explicit realized P&L from a broker sync (used when entry/exit prices
+  // aren't available, e.g. Schwab summary trades). When set, it overrides
+  // the price-based P&L calculation.
+  net_pnl: number | null;
   mae: number | null;
   mfe: number | null;
   notes: string | null;
