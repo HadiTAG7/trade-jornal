@@ -40,6 +40,28 @@ jobs:
       - name: Sync Capacitor
         run: npx cap sync android
 
+      # Self-provisioned signing: on the first run CI generates the signing
+      # keystore and commits it to the repo; every later run reuses it, so
+      # all published APKs share one signature and updates install cleanly
+      # over previously installed versions (same pattern as the user's other
+      # app). Pushes with GITHUB_TOKEN don't re-trigger workflows.
+      - name: Ensure signing keystore
+        run: |
+          if [ ! -f android/app/tradelog-release.keystore ]; then
+            keytool -genkeypair -v -keystore android/app/tradelog-release.keystore -alias tradelog \
+              -keyalg RSA -keysize 2048 -validity 10000 \
+              -storepass tradelog2026 -keypass tradelog2026 \
+              -dname "CN=TradeLog, OU=App, O=TradeLog, L=Riyadh, S=Riyadh, C=SA"
+            git config user.name "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            git add -f android/app/tradelog-release.keystore
+            git commit -m "CI: provision stable APK signing keystore"
+            git push
+            echo "Keystore provisioned and committed."
+          else
+            echo "Using existing signing keystore from the repo."
+          fi
+
       - name: Build APK
         working-directory: android
         run: ./gradlew assembleDebug
