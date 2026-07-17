@@ -7,8 +7,8 @@ android {
     // install cleanly. Used only when the keystore file is present locally.
     def tradelogKeystore = file('tradelog-release.keystore')
     signingConfigs {
-        if (tradelogKeystore.exists()) {
-            tradelog {
+        tradelog {
+            if (tradelogKeystore.exists()) {
                 storeFile tradelogKeystore
                 storePassword 'tradelog2026'
                 keyAlias 'tradelog'
@@ -31,9 +31,10 @@ android {
     }
     buildTypes {
         debug {
-            signingConfig signingConfigs.tradelog
+            if (tradelogKeystore.exists()) signingConfig signingConfigs.tradelog
         }
         release {
+            if (tradelogKeystore.exists()) signingConfig signingConfigs.tradelog
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
         }
