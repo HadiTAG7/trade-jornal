@@ -35,8 +35,3 @@ android/.idea
 android/app/src/main/assets/public
 android/app/src/main/assets/capacitor.config.json
 *.apk
-
-# Android signing key — kept local pending decision on storing it in the repo
-# (see signing options discussion). Remove this line + `git add` the keystore
-# to enable stable-signed CI builds.
-android/app/tradelog-release.keystore
