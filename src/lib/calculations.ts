@@ -11,7 +11,11 @@ export function calculateTradeMetrics(trade: Trade): TradeMetrics {
   let grossPnL = 0;
   let netPnL = 0;
 
-  if (exitPrice !== null) {
+  if (trade.net_pnl !== null && trade.net_pnl !== undefined) {
+    // Explicit realized P&L from a broker sync (no price data available).
+    netPnL = Number(trade.net_pnl);
+    grossPnL = netPnL + fees + commissions;
+  } else if (exitPrice !== null) {
     if (trade.side === 'LONG') {
       grossPnL = (exitPrice - entryPrice) * quantity;
     } else {
