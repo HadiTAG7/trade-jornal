@@ -140,10 +140,36 @@ async function writeTrade(projectId, uid, token, docId, doc) {
   if (!r.ok) throw new Error(`write ${docId} failed: ${r.status} ${await r.text()}`);
 }
 
-export default async function handler(req, res) {
-  const cronSecret = process.env.CRON_SECRET;
+// Authorize the request: either the Vercel cron secret, or a valid Firebase
+// ID token belonging to TARGET_UID (so the signed-in owner can trigger a
+// manual sync from the app without any secret shipped in the client bundle).
+async function isAuthorized(req) {
   const auth = req.headers['authorization'] || '';
-  if (cronSecret && auth !== `Bearer ${cronSecret}`) {
+  const cronSecret = process.env.CRON_SECRET;
+  if (cronSecret && auth === `Bearer ${cronSecret}`) return true;
+
+  const m = auth.match(/^Bearer (.+)$/);
+  if (!m) return false;
+  try {
+    const r = await fetch(
+      `https://identitytoolkit.googleapis.com/v1/accounts:lookup?key=${process.env.VITE_FIREBASE_API_KEY}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ idToken: m[1] }),
+      },
+    );
+    if (!r.ok) return false;
+    const d = await r.json();
+    const localId = d.users && d.users[0] && d.users[0].localId;
+    return localId === process.env.TARGET_UID;
+  } catch {
+    return false;
+  }
+}
+
+export default async function handler(req, res) {
+  if (!(await isAuthorized(req))) {
     return res.status(401).json({ error: 'unauthorized' });
   }
 
