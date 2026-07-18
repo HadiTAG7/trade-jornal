@@ -169,6 +169,14 @@ async function isAuthorized(req) {
 }
 
 export default async function handler(req, res) {
+  // CORS: the Android app calls this cross-origin from its localhost WebView.
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'authorization, content-type');
+  if (req.method === 'OPTIONS') {
+    return res.status(204).end();
+  }
+
   if (!(await isAuthorized(req))) {
     return res.status(401).json({ error: 'unauthorized' });
   }
