@@ -88,3 +88,20 @@ documents instead of duplicating them.
 | `npm run build` | Production build to `dist/` |
 | `npm run preview` | Preview the production build |
 | `npm run lint` | Run ESLint |
+
+## Daily broker sync
+
+`api/sync-trades.js` runs daily (Vercel Cron, see `vercel.json`) to pull
+closed trades from the connected Trading Helper service and write them into
+Firestore. Configure these Vercel environment variables:
+
+| Variable | Purpose |
+| --- | --- |
+| `RAILWAY_URL` | Base URL of the Trading Helper service |
+| `RAILWAY_PASSWORD` | Login password for that service |
+| `SYNC_FIREBASE_EMAIL` / `SYNC_FIREBASE_PASSWORD` | TradeLog account the sync writes as |
+| `SYNC_DAYS` | Look-back window in days (default 45) |
+| `CRON_SECRET` | Shared secret Vercel attaches to cron requests |
+
+The sync is idempotent — trades are keyed by a stable hash, so re-runs never
+create duplicates.
