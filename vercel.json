@@ -6,6 +6,11 @@
   "rewrites": [
     { "source": "/((?!api/).*)", "destination": "/index.html" }
   ],
+  "functions": {
+    "api/sync-trades.js": {
+      "includeFiles": "node_modules/sql.js/dist/sql-wasm.wasm"
+    }
+  },
   "crons": [
     { "path": "/api/sync-trades", "schedule": "0 6 * * *" }
   ]
