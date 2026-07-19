@@ -143,6 +143,87 @@ async function writeTrade(projectId, uid, token, docId, doc) {
   if (!r.ok) throw new Error(`write ${docId} failed: ${r.status} ${await r.text()}`);
 }
 
+// ET wall-clock ISO -> epoch seconds (uses the actual ET offset at that date).
+function etIsoToEpoch(iso) {
+  const guess = Date.parse(`${iso}Z`);
+  const offsetName = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'America/New_York',
+    timeZoneName: 'shortOffset',
+  }).formatToParts(new Date(guess)).find((p) => p.type === 'timeZoneName').value; // e.g. GMT-4
+  const m = offsetName.match(/GMT([+-]\d+)(?::(\d+))?/);
+  const hours = m ? parseInt(m[1], 10) : -5;
+  const mins = m && m[2] ? Math.sign(hours) * parseInt(m[2], 10) : 0;
+  return Math.floor(guess / 1000) - (hours * 3600 + mins * 60);
+}
+
+// Parse any stored exit_datetime into epoch seconds. UTC-style stamps carry
+// a zone ("Z"/offset); naive stamps are ET wall-clock (broker sync format).
+function exitToEpoch(iso) {
+  if (!iso) return null;
+  if (/[zZ]$|[+-]\d\d:\d\d$/.test(iso)) {
+    const t = Date.parse(iso);
+    return Number.isFinite(t) ? Math.floor(t / 1000) : null;
+  }
+  return etIsoToEpoch(iso.length === 16 ? `${iso}:00` : iso);
+}
+
+// Delete non-Schwab copies of trades the broker log covers (e.g. earlier
+// ThinkOrSwim/TraderVue imports of the same executions). A duplicate is the
+// same symbol + same quantity closing within 5 minutes of a broker trade.
+async function pruneCrossSourceDuplicates(projectId, uid, token, brokerRows) {
+  const broker = brokerRows
+    .filter((r) => r.symbol && r.closed_at)
+    .map((r) => ({
+      sym: String(r.symbol).toUpperCase(),
+      qty: Math.round(Number(r.qty) || 0),
+      t: Number(r.closed_at),
+    }));
+  if (!broker.length) return 0;
+  const minT = Math.min(...broker.map((b) => b.t)) - 86400;
+
+  const url = `${FIRESTORE}/projects/${projectId}/databases/(default)/documents/users/${uid}:runQuery`;
+  const isoFloor = new Date(minT * 1000).toISOString().slice(0, 10); // date prefix compares OK for both formats
+  const body = {
+    structuredQuery: {
+      from: [{ collectionId: 'trades' }],
+      where: {
+        fieldFilter: {
+          field: { fieldPath: 'exit_datetime' },
+          op: 'GREATER_THAN_OR_EQUAL',
+          value: { stringValue: isoFloor },
+        },
+      },
+      limit: 1000,
+    },
+  };
+  const r = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+    body: JSON.stringify(body),
+  });
+  if (!r.ok) throw new Error(`dup query failed: ${r.status}`);
+  const rows = await r.json();
+
+  let deleted = 0;
+  for (const row of rows) {
+    if (!row.document) continue;
+    const f = row.document.fields || {};
+    const src = f.source && f.source.stringValue;
+    if (src === 'Schwab') continue; // keep the broker copy
+    const sym = ((f.symbol && f.symbol.stringValue) || '').toUpperCase();
+    const qty = Math.round(Number((f.quantity && (f.quantity.integerValue ?? f.quantity.doubleValue)) || 0));
+    const exitIso = f.exit_datetime && f.exit_datetime.stringValue;
+    const t = exitToEpoch(exitIso);
+    if (!sym || !t) continue;
+    const isDup = broker.some((b) => b.sym === sym && b.qty === qty && Math.abs(b.t - t) <= 300);
+    if (isDup) {
+      await deleteTrade(projectId, uid, token, row.document.name.split('/').pop());
+      deleted++;
+    }
+  }
+  return deleted;
+}
+
 // Existing Schwab-sourced trade doc ids (via a source == 'Schwab' query).
 async function listSchwabDocIds(projectId, uid, token) {
   const url = `${FIRESTORE}/projects/${projectId}/databases/(default)/documents/users/${uid}:runQuery`;
@@ -245,7 +326,13 @@ export default async function handler(req, res) {
       }
     } catch { /* pruning is best-effort */ }
 
-    return res.status(200).json({ ok: true, rows: rows.length, written, pruned, uid });
+    // Remove older-source copies of the same executions (cross-source dupes).
+    let dedupedCrossSource = 0;
+    try {
+      dedupedCrossSource = await pruneCrossSourceDuplicates(projectId, uid, token, [...byKey.values()]);
+    } catch { /* best-effort */ }
+
+    return res.status(200).json({ ok: true, rows: rows.length, written, pruned, dedupedCrossSource, uid });
   } catch (err) {
     return res.status(500).json({ ok: false, error: String((err && err.message) || err) });
   }
