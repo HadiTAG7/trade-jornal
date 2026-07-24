@@ -450,7 +450,19 @@ export default function Trades() {
                             <TradeBadge side={trade.side} />
                           </TableCell>
                           <TableCell className="text-right font-mono text-sm">
-                            {Number(trade.quantity).toLocaleString()}
+                            <div className="flex items-center justify-end gap-1.5">
+                              <span>{Number(trade.quantity).toLocaleString()}</span>
+                              {trade.executions && trade.executions.length > 1 && (
+                                <span
+                                  className="rounded bg-muted px-1 text-[10px] text-muted-foreground"
+                                  title={`${trade.executions.length} fills${
+                                    trade.exit_datetime ? '' : ' · partially open'
+                                  }`}
+                                >
+                                  {trade.executions.length}f
+                                </span>
+                              )}
+                            </div>
                           </TableCell>
                           <TableCell className="text-right font-mono text-sm">
                             {formatCurrency(trade.entry_price)}

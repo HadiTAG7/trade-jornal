@@ -3,6 +3,15 @@ export type AttachmentKind = 'BEFORE' | 'AFTER' | 'OTHER';
 export type ChecklistValue = 'YES' | 'NO' | 'NA';
 export type ImportSourceType = 'ThinkOrSwim' | 'TraderVue' | 'Custom';
 
+// A single fill within a trade. Lets one trade hold several entries/exits
+// (scaling in and out) instead of a single entry/exit price.
+export interface TradeExecution {
+  action: 'BUY' | 'SELL';
+  quantity: number;
+  price: number;
+  datetime: string;
+}
+
 export interface Trade {
   id: string;
   user_id: string;
@@ -27,6 +36,9 @@ export interface Trade {
   // aren't available, e.g. Schwab summary trades). When set, it overrides
   // the price-based P&L calculation.
   net_pnl: number | null;
+  // Individual fills. When present, quantity / entry_price / exit_price and
+  // P&L are derived from these (average-cost accounting).
+  executions?: TradeExecution[] | null;
   mae: number | null;
   mfe: number | null;
   notes: string | null;
