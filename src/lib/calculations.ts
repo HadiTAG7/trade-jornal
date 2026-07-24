@@ -1,4 +1,5 @@
 import { Trade, TradeMetrics, AnalyticsData, DailyStats } from '@/types/trade';
+import { summarizeExecutions } from '@/lib/executions';
 
 export function calculateTradeMetrics(trade: Trade): TradeMetrics {
   const entryPrice = Number(trade.entry_price);
@@ -11,7 +12,12 @@ export function calculateTradeMetrics(trade: Trade): TradeMetrics {
   let grossPnL = 0;
   let netPnL = 0;
 
-  if (trade.net_pnl !== null && trade.net_pnl !== undefined) {
+  if (trade.executions && trade.executions.length > 0) {
+    // Multiple fills (scaling in/out): average-cost accounting.
+    const s = summarizeExecutions(trade.executions, trade.side);
+    grossPnL = s.realizedPnL;
+    netPnL = s.closedQty > 0 ? s.realizedPnL - fees - commissions : 0;
+  } else if (trade.net_pnl !== null && trade.net_pnl !== undefined) {
     // Explicit realized P&L from a broker sync (no price data available).
     netPnL = Number(trade.net_pnl);
     grossPnL = netPnL + fees + commissions;

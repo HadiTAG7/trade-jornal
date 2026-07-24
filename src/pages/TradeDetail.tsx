@@ -16,7 +16,9 @@ import {
 } from '@/components/ui/select';
 import { fetchAll, fetchById, insertItem, updateItem } from '@/lib/db';
 import { useAuth } from '@/contexts/AuthContext';
-import { Trade, Strategy, Account, TradeSide } from '@/types/trade';
+import { Trade, Strategy, Account, TradeSide, TradeExecution } from '@/types/trade';
+import { ExecutionsEditor } from '@/components/trades/ExecutionsEditor';
+import { aggregateFromExecutions } from '@/lib/executions';
 import { toast } from 'sonner';
 import { format } from 'date-fns';
 
@@ -34,6 +36,7 @@ export default function TradeDetail() {
   const [saving, setSaving] = useState(false);
   const [strategies, setStrategies] = useState<Strategy[]>([]);
   const [accounts, setAccounts] = useState<Account[]>([]);
+  const [executions, setExecutions] = useState<TradeExecution[]>([]);
 
   const [formData, setFormData] = useState({
     symbol: '',
@@ -72,6 +75,15 @@ export default function TradeDetail() {
         navigate(`/trades${referrerSearch}`);
         return;
       }
+
+      setExecutions(
+        (data.executions || []).map((e) => ({
+          action: e.action === 'SELL' ? 'SELL' : 'BUY',
+          quantity: Number(e.quantity) || 0,
+          price: Number(e.price) || 0,
+          datetime: e.datetime ? format(new Date(e.datetime), "yyyy-MM-dd'T'HH:mm") : '',
+        })),
+      );
 
       setFormData({
         symbol: data.symbol || '',
@@ -117,21 +129,59 @@ export default function TradeDetail() {
     e.preventDefault();
     if (!user) return;
 
-    if (!formData.symbol || !formData.quantity || !formData.entry_price || !formData.entry_datetime) {
+    const validFills = executions.filter((e) => e.quantity > 0 && e.price > 0 && e.datetime);
+    const hasFills = validFills.length > 0;
+
+    if (!formData.symbol) {
+      toast.error('Please enter a symbol');
+      return;
+    }
+    if (!hasFills && (!formData.quantity || !formData.entry_price || !formData.entry_datetime)) {
       toast.error('Please fill in all required fields');
       return;
+    }
+    if (hasFills) {
+      const agg = aggregateFromExecutions(validFills, formData.side);
+      if (agg.quantity <= 0) {
+        toast.error(`Add at least one ${formData.side === 'SHORT' ? 'sell' : 'buy'} fill that opens the position`);
+        return;
+      }
     }
 
     setSaving(true);
     try {
+      // With fills, quantity / prices / dates / P&L are derived from them so
+      // the rest of the app keeps working off the same fields.
+      const agg = hasFills
+        ? aggregateFromExecutions(
+            validFills.map((e) => ({ ...e, datetime: new Date(e.datetime).toISOString() })),
+            formData.side,
+          )
+        : null;
+
       const tradeData = {
         symbol: formData.symbol.toUpperCase(),
         side: formData.side,
-        quantity: parseFloat(formData.quantity),
-        entry_price: parseFloat(formData.entry_price),
-        exit_price: formData.exit_price ? parseFloat(formData.exit_price) : null,
-        entry_datetime: new Date(formData.entry_datetime).toISOString(),
-        exit_datetime: formData.exit_datetime ? new Date(formData.exit_datetime).toISOString() : null,
+        executions: hasFills
+          ? validFills.map((e) => ({
+              action: e.action,
+              quantity: e.quantity,
+              price: e.price,
+              datetime: new Date(e.datetime).toISOString(),
+            }))
+          : null,
+        net_pnl: agg ? agg.net_pnl : null,
+        quantity: agg ? agg.quantity : parseFloat(formData.quantity),
+        entry_price: agg ? agg.entry_price : parseFloat(formData.entry_price),
+        exit_price: agg
+          ? agg.exit_price
+          : formData.exit_price ? parseFloat(formData.exit_price) : null,
+        entry_datetime: agg && agg.entry_datetime
+          ? agg.entry_datetime
+          : new Date(formData.entry_datetime).toISOString(),
+        exit_datetime: agg
+          ? agg.exit_datetime
+          : formData.exit_datetime ? new Date(formData.exit_datetime).toISOString() : null,
         stop_loss: formData.stop_loss ? parseFloat(formData.stop_loss) : null,
         fees: parseFloat(formData.fees) || 0,
         commissions: parseFloat(formData.commissions) || 0,
@@ -160,6 +210,8 @@ export default function TradeDetail() {
       setSaving(false);
     }
   };
+
+  const usingFills = executions.some((e) => e.quantity > 0 && e.price > 0 && e.datetime);
 
   if (loading) {
     return (
@@ -213,6 +265,11 @@ export default function TradeDetail() {
               <CardTitle>Trade Details</CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
+              {usingFills && (
+                <p className="rounded-md border border-border bg-muted/30 p-3 text-sm text-muted-foreground">
+                  Quantity, prices and dates are calculated from the fills below.
+                </p>
+              )}
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
                   <Label htmlFor="symbol">Symbol *</Label>
@@ -247,6 +304,7 @@ export default function TradeDetail() {
                     step="any"
                     value={formData.quantity}
                     onChange={(e) => handleChange('quantity', e.target.value)}
+                    disabled={usingFills}
                     placeholder="100"
                     required
                   />
@@ -273,6 +331,7 @@ export default function TradeDetail() {
                     step="any"
                     value={formData.entry_price}
                     onChange={(e) => handleChange('entry_price', e.target.value)}
+                    disabled={usingFills}
                     placeholder="150.00"
                     required
                   />
@@ -285,6 +344,7 @@ export default function TradeDetail() {
                     step="any"
                     value={formData.exit_price}
                     onChange={(e) => handleChange('exit_price', e.target.value)}
+                    disabled={usingFills}
                     placeholder="155.00"
                   />
                 </div>
@@ -298,6 +358,7 @@ export default function TradeDetail() {
                     type="datetime-local"
                     value={formData.entry_datetime}
                     onChange={(e) => handleChange('entry_datetime', e.target.value)}
+                    disabled={usingFills}
                     required
                   />
                 </div>
@@ -308,6 +369,7 @@ export default function TradeDetail() {
                     type="datetime-local"
                     value={formData.exit_datetime}
                     onChange={(e) => handleChange('exit_datetime', e.target.value)}
+                    disabled={usingFills}
                   />
                 </div>
               </div>
@@ -376,6 +438,15 @@ export default function TradeDetail() {
               </div>
             </CardContent>
           </Card>
+
+          {/* Fills: partial entries/exits within this one trade */}
+          <div className="md:col-span-2">
+            <ExecutionsEditor
+              side={formData.side}
+              executions={executions}
+              onChange={setExecutions}
+            />
+          </div>
 
           {/* Notes */}
           <Card className="md:col-span-2">
