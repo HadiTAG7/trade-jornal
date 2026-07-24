@@ -7,9 +7,11 @@ interface MainLayoutProps {
 
 export function MainLayout({ children }: MainLayoutProps) {
   return (
-    <div className="app-safe-body min-h-screen bg-background">
+    <div className="app-safe-body min-h-screen w-full max-w-full overflow-x-hidden bg-background">
       <Header />
-      <main className="container mx-auto px-4 py-6 lg:px-6 lg:py-8">
+      {/* Full width (no fixed container cap) so wide/landscape screens are
+          used fully; wide content scrolls inside its own container. */}
+      <main className="w-full max-w-[1800px] mx-auto px-4 py-6 lg:px-6 lg:py-8">
         {children}
       </main>
     </div>
