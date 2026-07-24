@@ -11,6 +11,16 @@
  * side cutouts and the bottom gesture bar.
  */
 @layer base {
+  /* Never let the page itself scroll sideways: wide content (tables) must
+     scroll inside its own container, otherwise swiping drags the whole page
+     and reveals empty background next to the content. */
+  html,
+  body {
+    width: 100%;
+    max-width: 100%;
+    overflow-x: hidden;
+  }
+
   .app-safe-header {
     padding-top: env(safe-area-inset-top, 0px);
     padding-left: env(safe-area-inset-left, 0px);
