@@ -121,3 +121,23 @@ the last result and warns when the last success is more than 36 hours old.
 
 `SYNC_PRUNE_DUPES=1` opts into deleting cross-source duplicates; without it they
 are only flagged (`archived` + `duplicate_of`) for review.
+
+## Home-screen widget
+
+The Android widget renders from a day → net P&L map in SharedPreferences, written
+by the app (`src/lib/widgetData.ts`) and refreshed in the background by
+`WidgetRefreshWorker`, which calls `api/widget-data` every few hours so a day's
+trading shows on the home screen without opening the app. The same response
+carries the last sync result, and the worker raises a notification when the sync
+has been failing.
+
+There is deliberately no Firebase Cloud Messaging: it would need an Android app
+registered in the Firebase console and a `google-services.json` committed here,
+and WorkManager covers the same need with nothing to set up. Samsung defers
+background work aggressively, so treat the cadence as "a few times a day" rather
+than exact.
+
+The worker signs its request with an ID token minted from a refresh token the app
+stores in its own SharedPreferences on sign-in. That token already lives in this
+app's sandbox — the Firebase web SDK persists it in the WebView — so the copy
+doesn't widen who can reach it.

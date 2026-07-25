@@ -9,6 +9,7 @@ import {
   User as FirebaseUser,
 } from 'firebase/auth';
 import { doc, setDoc } from 'firebase/firestore';
+import { clearWidgetCredentials, storeWidgetCredentials } from '@/lib/widgetData';
 import { auth, db } from '@/integrations/firebase/client';
 
 // Minimal user shape the app relies on (kept compatible with the previous
@@ -59,6 +60,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const unsubscribe = onAuthStateChanged(auth, (fbUser) => {
       setUser(toAppUser(fbUser));
       setLoading(false);
+      // Hand the Android widget what it needs to refresh itself while the app
+      // isn't running. Best-effort: on the web these are no-ops.
+      if (fbUser) storeWidgetCredentials(fbUser.refreshToken, fbUser.uid);
+      else clearWidgetCredentials();
     });
     return () => unsubscribe();
   }, []);
