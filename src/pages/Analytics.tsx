@@ -5,8 +5,21 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { fetchAll } from '@/lib/db';
 import { useAuth } from '@/contexts/AuthContext';
 import { Trade, AnalyticsData, Strategy } from '@/types/trade';
-import { calculateAnalytics, calculateTradeMetrics, formatCurrency, formatPercent, formatR } from '@/lib/calculations';
-import { closedAt, sortedClosedTrades } from '@/lib/tradeStatus';
+import { calculateAnalytics, formatCurrency, formatPercent, formatR } from '@/lib/calculations';
+import { sortedClosedTrades } from '@/lib/tradeStatus';
+import {
+  buildMetrics,
+  dailyEquitySeries,
+  dayOfWeekSeries,
+  hourOfDaySeries,
+  rDistribution,
+  sideSeries,
+} from '@/lib/analyticsSeries';
+import { byId, toTrades } from '@/lib/tradeMapping';
+import { loadList } from '@/lib/safeLoad';
+import { useTradeFilters } from '@/hooks/useTradeFilters';
+import { TradeFiltersComponent } from '@/components/TradeFilters';
+import { StrategyCompare } from '@/components/analytics/StrategyCompare';
 import {
   AreaChart,
   Area,
@@ -22,16 +35,17 @@ import {
   ResponsiveContainer,
   Legend,
 } from 'recharts';
-import { format, getDay, getHours, parseISO } from 'date-fns';
-import { byId, toTrades } from '@/lib/tradeMapping';
 
-const COLORS = ['hsl(var(--chart-1))', 'hsl(var(--chart-2))', 'hsl(var(--chart-3))', 'hsl(var(--chart-4))', 'hsl(var(--chart-5))'];
-const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
 export default function Analytics() {
   const { user } = useAuth();
-  const [trades, setTrades] = useState<Trade[]>([]);
+  const [allTrades, setAllTrades] = useState<Trade[]>([]);
+  const [strategies, setStrategies] = useState<Strategy[]>([]);
   const [loading, setLoading] = useState(true);
+  // This page had no filters and no date range at all, so every figure on it was
+  // all-time whether or not that was what you wanted.
+  const { filters, setFilter, setDatePreset, clearDateFilters, filterTrades } = useTradeFilters();
+  const trades = useMemo(() => filterTrades(allTrades), [filterTrades, allTrades]);
 
   useEffect(() => {
     if (user) fetchTrades();
@@ -42,11 +56,10 @@ export default function Analytics() {
     try {
       const [data, allStrategies] = await Promise.all([
         fetchAll<Trade>(user.id, 'trades', 'entry_datetime', 'asc'),
-        fetchAll<Strategy>(user.id, 'strategies'),
+        loadList('strategies', () => fetchAll<Strategy>(user.id, 'strategies')),
       ]);
-      const typedTrades = toTrades(data, { strategiesById: byId(allStrategies) });
-
-      setTrades(typedTrades);
+      setStrategies(allStrategies);
+      setAllTrades(toTrades(data, { strategiesById: byId(allStrategies) }));
     } catch (error) {
       console.error('Error fetching trades:', error);
     } finally {
@@ -55,101 +68,36 @@ export default function Analytics() {
   };
 
   const analytics = useMemo(() => calculateAnalytics(trades), [trades]);
-  // Closed trades in the order they were realized. The curves below are
-  // cumulative, so an entry-date order (what this page used) drew a curve that
-  // never happened.
+  // Closed trades in the order they were realized, with their metrics computed
+  // once. The series below all come from `analyticsSeries`, so this page and the
+  // per-strategy comparison are drawing the same numbers the same way.
   const closedTrades = useMemo(() => sortedClosedTrades(trades), [trades]);
-  const closeLabel = (trade: Trade) => format(parseISO(closedAt(trade)!), 'MMM d');
+  const metrics = useMemo(() => buildMetrics(closedTrades), [closedTrades]);
 
-  // Equity curve
-  const equityCurve = useMemo(() => {
-    let equity = 0;
-    return closedTrades.map(trade => {
-      const metrics = calculateTradeMetrics(trade);
-      equity += metrics.netPnL;
-      return {
-        date: closeLabel(trade),
-        equity,
-        pnl: metrics.netPnL,
-      };
-    });
-  }, [closedTrades]);
+  // Equity and drawdown, one point per trading day rather than per trade: the
+  // per-trade axis had 3,000 unreadable ticks and could not be aligned with
+  // another segment's curve.
+  const equityCurve = useMemo(
+    () => dailyEquitySeries(closedTrades, metrics),
+    [closedTrades, metrics],
+  );
 
-  // Drawdown curve
-  const drawdownCurve = useMemo(() => {
-    let equity = 0;
-    let peak = 0;
-    return closedTrades.map(trade => {
-      const metrics = calculateTradeMetrics(trade);
-      equity += metrics.netPnL;
-      if (equity > peak) peak = equity;
-      const drawdown = peak > 0 ? ((peak - equity) / peak) * 100 : 0;
-      return {
-        date: closeLabel(trade),
-        drawdown,
-      };
-    });
-  }, [closedTrades]);
+  const rDistributionData = useMemo(
+    () => rDistribution(closedTrades, metrics),
+    [closedTrades, metrics],
+  );
 
-  // R distribution
-  const rDistribution = useMemo(() => {
-    const buckets: { [key: string]: number } = {};
-    closedTrades.forEach(trade => {
-      const metrics = calculateTradeMetrics(trade);
-      if (metrics.realizedR !== null) {
-        const bucket = Math.floor(metrics.realizedR);
-        const key = bucket >= 0 ? `+${bucket}R` : `${bucket}R`;
-        buckets[key] = (buckets[key] || 0) + 1;
-      }
-    });
-    return Object.entries(buckets)
-      .map(([r, count]) => ({ r, count }))
-      .sort((a, b) => parseFloat(a.r) - parseFloat(b.r));
-  }, [closedTrades]);
+  const dayOfWeekPerf = useMemo(
+    () => dayOfWeekSeries(closedTrades, metrics),
+    [closedTrades, metrics],
+  );
 
-  // Day of week performance
-  const dayOfWeekPerf = useMemo(() => {
-    const dayStats = DAY_NAMES.map(name => ({ name, pnl: 0, trades: 0 }));
-    closedTrades.forEach(trade => {
-      const day = getDay(parseISO(closedAt(trade)!));
-      const metrics = calculateTradeMetrics(trade);
-      dayStats[day].pnl += metrics.netPnL;
-      dayStats[day].trades += 1;
-    });
-    return dayStats;
-  }, [closedTrades]);
+  const timeOfDayPerf = useMemo(
+    () => hourOfDaySeries(closedTrades, metrics),
+    [closedTrades, metrics],
+  );
 
-  // Time of day performance
-  const timeOfDayPerf = useMemo(() => {
-    const hourStats: { [key: number]: { pnl: number; trades: number } } = {};
-    closedTrades.forEach(trade => {
-      const hour = getHours(parseISO(trade.entry_datetime));
-      if (!hourStats[hour]) hourStats[hour] = { pnl: 0, trades: 0 };
-      const metrics = calculateTradeMetrics(trade);
-      hourStats[hour].pnl += metrics.netPnL;
-      hourStats[hour].trades += 1;
-    });
-    return Object.entries(hourStats)
-      .map(([hour, data]) => ({
-        hour: `${hour}:00`,
-        ...data,
-      }))
-      .sort((a, b) => parseInt(a.hour) - parseInt(b.hour));
-  }, [closedTrades]);
-
-  // Long vs Short
-  const sidePerf = useMemo(() => {
-    const longTrades = closedTrades.filter(t => t.side === 'LONG');
-    const shortTrades = closedTrades.filter(t => t.side === 'SHORT');
-    
-    const longPnL = longTrades.reduce((sum, t) => sum + calculateTradeMetrics(t).netPnL, 0);
-    const shortPnL = shortTrades.reduce((sum, t) => sum + calculateTradeMetrics(t).netPnL, 0);
-    
-    return [
-      { name: 'Long', value: longTrades.length, pnl: longPnL },
-      { name: 'Short', value: shortTrades.length, pnl: shortPnL },
-    ];
-  }, [closedTrades]);
+  const sidePerf = useMemo(() => sideSeries(closedTrades, metrics), [closedTrades, metrics]);
 
   // Strategy performance
   const strategyPerf = useMemo(() => {
@@ -157,10 +105,10 @@ export default function Analytics() {
     closedTrades.forEach(trade => {
       const name = trade.strategy?.name || 'No Strategy';
       if (!stratStats[name]) stratStats[name] = { pnl: 0, trades: 0, wins: 0 };
-      const metrics = calculateTradeMetrics(trade);
-      stratStats[name].pnl += metrics.netPnL;
+      const netPnL = metrics.get(trade.id)?.netPnL ?? 0;
+      stratStats[name].pnl += netPnL;
       stratStats[name].trades += 1;
-      if (metrics.netPnL > 0) stratStats[name].wins += 1;
+      if (netPnL > 0) stratStats[name].wins += 1;
     });
     return Object.entries(stratStats)
       .map(([name, data]) => ({
@@ -169,7 +117,7 @@ export default function Analytics() {
         winRate: (data.wins / data.trades) * 100,
       }))
       .sort((a, b) => b.pnl - a.pnl);
-  }, [closedTrades]);
+  }, [closedTrades, metrics]);
 
   if (loading) {
     return (
@@ -188,6 +136,15 @@ export default function Analytics() {
           <h1 className="text-3xl font-bold tracking-tight">Analytics</h1>
           <p className="text-muted-foreground">Deep dive into your trading performance</p>
         </div>
+
+        <TradeFiltersComponent
+          filters={filters}
+          strategies={strategies}
+          onFilterChange={setFilter}
+          onDatePreset={setDatePreset}
+          onClearDates={clearDateFilters}
+          compact
+        />
 
         {/* KPI Summary */}
         <div className="grid gap-4 md:grid-cols-4 lg:grid-cols-6">
@@ -247,6 +204,7 @@ export default function Analytics() {
             <TabsTrigger value="distribution">Distribution</TabsTrigger>
             <TabsTrigger value="time">Time Analysis</TabsTrigger>
             <TabsTrigger value="breakdown">Breakdown</TabsTrigger>
+            <TabsTrigger value="compare">Bot vs manual</TabsTrigger>
           </TabsList>
 
           <TabsContent value="curves" className="space-y-6">
@@ -292,7 +250,7 @@ export default function Analytics() {
                 <CardContent>
                   <div className="h-[300px]">
                     <ResponsiveContainer width="100%" height="100%">
-                      <AreaChart data={drawdownCurve}>
+                      <AreaChart data={equityCurve}>
                         <defs>
                           <linearGradient id="colorDrawdown" x1="0" y1="0" x2="0" y2="1">
                             <stop offset="5%" stopColor="hsl(var(--loss))" stopOpacity={0.3} />
@@ -310,7 +268,7 @@ export default function Analytics() {
                           }}
                           formatter={(value: number) => [`${value.toFixed(1)}%`, 'Drawdown']}
                         />
-                        <Area type="monotone" dataKey="drawdown" stroke="hsl(var(--loss))" fill="url(#colorDrawdown)" strokeWidth={2} />
+                        <Area type="monotone" dataKey="drawdownPct" stroke="hsl(var(--loss))" fill="url(#colorDrawdown)" strokeWidth={2} />
                       </AreaChart>
                     </ResponsiveContainer>
                   </div>
@@ -329,7 +287,7 @@ export default function Analytics() {
                 <CardContent>
                   <div className="h-[300px]">
                     <ResponsiveContainer width="100%" height="100%">
-                      <BarChart data={rDistribution}>
+                      <BarChart data={rDistributionData}>
                         <CartesianGrid strokeDasharray="3 3" className="stroke-border/50" />
                         <XAxis dataKey="r" className="text-xs fill-muted-foreground" />
                         <YAxis className="text-xs fill-muted-foreground" />
@@ -487,6 +445,10 @@ export default function Analytics() {
                 </div>
               </CardContent>
             </Card>
+          </TabsContent>
+
+          <TabsContent value="compare">
+            <StrategyCompare trades={trades} strategies={strategies} />
           </TabsContent>
         </Tabs>
       </div>
