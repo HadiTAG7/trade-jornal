@@ -4,7 +4,10 @@
   "buildCommand": "npm run build",
   "outputDirectory": "dist",
   "rewrites": [
-    { "source": "/((?!api/).*)", "destination": "/index.html" }
+    {
+      "source": "/((?!api/).*)",
+      "destination": "/index.html"
+    }
   ],
   "functions": {
     "api/sync-trades.js": {
@@ -12,6 +15,13 @@
     }
   },
   "crons": [
-    { "path": "/api/sync-trades", "schedule": "0 6 * * *" }
+    {
+      "path": "/api/sync-trades",
+      "schedule": "0 15 * * *"
+    },
+    {
+      "path": "/api/sync-trades",
+      "schedule": "0 20 * * *"
+    }
   ]
 }
