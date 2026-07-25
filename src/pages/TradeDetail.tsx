@@ -182,6 +182,10 @@ export default function TradeDetail() {
         exit_datetime: agg
           ? agg.exit_datetime
           : formData.exit_datetime ? new Date(formData.exit_datetime).toISOString() : null,
+        // Lets the trades table flag a scaled-out position without re-walking
+        // the fills on every render.
+        open_quantity: agg ? agg.open_quantity : null,
+        fully_closed: agg ? agg.fully_closed : null,
         stop_loss: formData.stop_loss ? parseFloat(formData.stop_loss) : null,
         fees: parseFloat(formData.fees) || 0,
         commissions: parseFloat(formData.commissions) || 0,

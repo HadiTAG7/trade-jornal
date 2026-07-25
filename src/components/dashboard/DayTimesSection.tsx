@@ -17,6 +17,7 @@ import {
   ResponsiveContainer,
   ReferenceLine,
 } from 'recharts';
+import { closedAt, closedTrades as allClosedTrades, holdMinutes } from '@/lib/tradeStatus';
 
 interface DayTimesSectionProps {
   trades: Trade[];
@@ -138,10 +139,7 @@ function HorizontalBarChart({
 export function DayTimesSection({ trades }: DayTimesSectionProps) {
   const [hourTimeframe, setHourTimeframe] = useState<TimeframeOption>('1h');
 
-  const closedTrades = useMemo(
-    () => trades.filter(t => t.exit_datetime !== null && t.exit_price !== null),
-    [trades]
-  );
+  const closedTrades = useMemo(() => allClosedTrades(trades), [trades]);
 
   // Day of Week data
   const dayOfWeekData = useMemo(() => {
@@ -230,7 +228,7 @@ export function DayTimesSection({ trades }: DayTimesSectionProps) {
     }
 
     closedTrades.forEach(trade => {
-      const exitDate = new Date(trade.exit_datetime!);
+      const exitDate = new Date(closedAt(trade)!);
       const month = exitDate.getMonth();
       const metrics = calculateTradeMetrics(trade);
       
@@ -256,9 +254,8 @@ export function DayTimesSection({ trades }: DayTimesSectionProps) {
     });
 
     closedTrades.forEach(trade => {
-      const entryDate = new Date(trade.entry_datetime);
-      const exitDate = new Date(trade.exit_datetime!);
-      const durationMinutes = (exitDate.getTime() - entryDate.getTime()) / (1000 * 60);
+      const durationMinutes = holdMinutes(trade);
+      if (durationMinutes === null) return;
       
       // Find the appropriate bucket
       let bucketLabel = DURATION_BUCKETS[DURATION_BUCKETS.length - 1].label;

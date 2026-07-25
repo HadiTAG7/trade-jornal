@@ -14,6 +14,7 @@ import {
   ResponsiveContainer,
   ReferenceLine,
 } from 'recharts';
+import { closedTrades as allClosedTrades } from '@/lib/tradeStatus';
 
 interface InstrumentSectionProps {
   trades: Trade[];
@@ -185,10 +186,7 @@ function EmptyBucketChart({
 }
 
 export function InstrumentSection({ trades }: InstrumentSectionProps) {
-  const closedTrades = useMemo(
-    () => trades.filter(t => t.exit_datetime !== null && t.exit_price !== null),
-    [trades]
-  );
+  const closedTrades = useMemo(() => allClosedTrades(trades), [trades]);
 
   // Performance by Symbol data
   const symbolPerformanceData = useMemo(() => {

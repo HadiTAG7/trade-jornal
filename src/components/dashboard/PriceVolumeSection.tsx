@@ -14,6 +14,7 @@ import {
   ResponsiveContainer,
   ReferenceLine,
 } from 'recharts';
+import { closedTrades as allClosedTrades } from '@/lib/tradeStatus';
 
 interface PriceVolumeSectionProps {
   trades: Trade[];
@@ -135,10 +136,7 @@ function HorizontalBarChart({
 }
 
 export function PriceVolumeSection({ trades }: PriceVolumeSectionProps) {
-  const closedTrades = useMemo(
-    () => trades.filter(t => t.exit_datetime !== null && t.exit_price !== null),
-    [trades]
-  );
+  const closedTrades = useMemo(() => allClosedTrades(trades), [trades]);
 
   // By Trade Price data (using entry_price)
   const tradePriceData = useMemo(() => {
@@ -184,8 +182,9 @@ export function PriceVolumeSection({ trades }: PriceVolumeSectionProps) {
     });
 
     closedTrades.forEach(trade => {
-      // Calculate price range as the absolute difference between entry and exit prices
-      const priceRange = Math.abs(trade.exit_price! - trade.entry_price);
+      // Needs both prices — broker-synced trades report only realized P&L.
+      if (trade.exit_price === null || trade.exit_price === undefined) return;
+      const priceRange = Math.abs(trade.exit_price - trade.entry_price);
       
       // Find the appropriate bucket
       let bucketLabel = PRICE_RANGE_BUCKETS[PRICE_RANGE_BUCKETS.length - 1].label;

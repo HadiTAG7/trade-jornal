@@ -146,19 +146,39 @@ export async function importTradesByHash(
   return entries.length;
 }
 
-export async function fetchTradesByExitRange<T>(
+/**
+ * Trades that closed within [startIso, endIso].
+ *
+ * Two queries, because "closed" is not a single stored field: most trades carry
+ * `exit_datetime`, but a broker-synced one can report only a realized `net_pnl`
+ * and then buckets on its entry day (see `closedAt` in `tradeStatus.ts`).
+ * Querying `exit_datetime` alone — what the calendar used to do — dropped those
+ * silently, which is why the calendar and the dashboard totalled different sets.
+ * Callers still filter with `closedTrades`, so open positions picked up by the
+ * entry-date query fall away.
+ */
+export async function fetchTradesByCloseRange<T>(
   uid: string,
   startIso: string,
   endIso: string,
 ): Promise<T[]> {
-  const q = query(
-    userCol(uid, 'trades'),
-    where('exit_datetime', '>=', startIso),
-    where('exit_datetime', '<=', endIso),
-    orderBy('exit_datetime', 'desc'),
+  const snaps = await Promise.all(
+    ['exit_datetime', 'entry_datetime'].map((field) =>
+      getDocs(
+        query(
+          userCol(uid, 'trades'),
+          where(field, '>=', startIso),
+          where(field, '<=', endIso),
+        ),
+      ),
+    ),
   );
-  const snap = await getDocs(q);
-  return snap.docs.map((d) => withId<T>(d));
+
+  const byId = new Map<string, T>();
+  for (const snap of snaps) {
+    for (const d of snap.docs) byId.set(d.id, withId<T>(d));
+  }
+  return [...byId.values()];
 }
 
 // ---- journal entries (doc id = yyyy-MM-dd, natural upsert key) ----

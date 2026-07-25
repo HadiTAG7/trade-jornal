@@ -6,6 +6,7 @@ import { fetchAll } from '@/lib/db';
 import { useAuth } from '@/contexts/AuthContext';
 import { Trade, AnalyticsData, Strategy } from '@/types/trade';
 import { calculateAnalytics, calculateTradeMetrics, formatCurrency, formatPercent, formatR } from '@/lib/calculations';
+import { closedAt, sortedClosedTrades } from '@/lib/tradeStatus';
 import {
   AreaChart,
   Area,
@@ -64,7 +65,11 @@ export default function Analytics() {
   };
 
   const analytics = useMemo(() => calculateAnalytics(trades), [trades]);
-  const closedTrades = useMemo(() => trades.filter(t => t.exit_price !== null), [trades]);
+  // Closed trades in the order they were realized. The curves below are
+  // cumulative, so an entry-date order (what this page used) drew a curve that
+  // never happened.
+  const closedTrades = useMemo(() => sortedClosedTrades(trades), [trades]);
+  const closeLabel = (trade: Trade) => format(parseISO(closedAt(trade)!), 'MMM d');
 
   // Equity curve
   const equityCurve = useMemo(() => {
@@ -73,7 +78,7 @@ export default function Analytics() {
       const metrics = calculateTradeMetrics(trade);
       equity += metrics.netPnL;
       return {
-        date: format(parseISO(trade.exit_datetime!), 'MMM d'),
+        date: closeLabel(trade),
         equity,
         pnl: metrics.netPnL,
       };
@@ -90,7 +95,7 @@ export default function Analytics() {
       if (equity > peak) peak = equity;
       const drawdown = peak > 0 ? ((peak - equity) / peak) * 100 : 0;
       return {
-        date: format(parseISO(trade.exit_datetime!), 'MMM d'),
+        date: closeLabel(trade),
         drawdown,
       };
     });
@@ -116,7 +121,7 @@ export default function Analytics() {
   const dayOfWeekPerf = useMemo(() => {
     const dayStats = DAY_NAMES.map(name => ({ name, pnl: 0, trades: 0 }));
     closedTrades.forEach(trade => {
-      const day = getDay(parseISO(trade.exit_datetime!));
+      const day = getDay(parseISO(closedAt(trade)!));
       const metrics = calculateTradeMetrics(trade);
       dayStats[day].pnl += metrics.netPnL;
       dayStats[day].trades += 1;

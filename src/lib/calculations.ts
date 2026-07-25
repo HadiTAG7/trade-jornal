@@ -1,5 +1,12 @@
 import { Trade, TradeMetrics, AnalyticsData, DailyStats } from '@/types/trade';
 import { summarizeExecutions } from '@/lib/executions';
+import {
+  closedDayKey,
+  closedTrades,
+  compareByClose,
+  holdMinutes,
+  sortedClosedTrades,
+} from '@/lib/tradeStatus';
 
 export function calculateTradeMetrics(trade: Trade): TradeMetrics {
   const entryPrice = Number(trade.entry_price);
@@ -72,14 +79,14 @@ export function calculateAnalytics(trades: Trade[]): AnalyticsData {
     };
   }
 
-  const closedTrades = trades.filter(t => t.exit_price !== null);
-  const metricsArray = closedTrades.map(calculateTradeMetrics);
+  const closed = closedTrades(trades);
+  const metricsArray = closed.map(calculateTradeMetrics);
 
   const wins = metricsArray.filter(m => m.netPnL > 0);
   const losses = metricsArray.filter(m => m.netPnL < 0);
 
   const totalNetPnL = metricsArray.reduce((sum, m) => sum + m.netPnL, 0);
-  const winRate = closedTrades.length > 0 ? (wins.length / closedTrades.length) * 100 : 0;
+  const winRate = closed.length > 0 ? (wins.length / closed.length) * 100 : 0;
 
   // Calculate average R and total R (only for trades with R calculated)
   const tradesWithR = metricsArray.filter(m => m.realizedR !== null);
@@ -101,10 +108,8 @@ export function calculateAnalytics(trades: Trade[]): AnalyticsData {
   let peak = 0;
   let equity = 0;
   
-  // Sort by exit date for equity curve
-  const sortedMetrics = [...closedTrades]
-    .sort((a, b) => new Date(a.exit_datetime!).getTime() - new Date(b.exit_datetime!).getTime())
-    .map(calculateTradeMetrics);
+  // Order by the moment each trade was actually realized, not by entry.
+  const sortedMetrics = sortedClosedTrades(trades).map(calculateTradeMetrics);
 
   for (const m of sortedMetrics) {
     equity += m.netPnL;
@@ -152,7 +157,7 @@ export function calculateAnalytics(trades: Trade[]): AnalyticsData {
   return {
     totalNetPnL,
     totalR,
-    totalTrades: closedTrades.length,
+    totalTrades: closed.length,
     winRate,
     avgR,
     expectancy,
@@ -186,10 +191,13 @@ export interface DetailedStats {
   lossRate: number;
   scratchRate: number;
   
-  // Hold times
+  // Hold times. `holdTimeSampleSize` is how many trades actually had a usable
+  // open time — broker-synced trades often don't, and averaging their zeroes in
+  // used to drag every hold time towards nothing.
   avgHoldTimeMinutes: number;
   avgHoldTimeWinningMinutes: number;
   avgHoldTimeLosingMinutes: number;
+  holdTimeSampleSize: number;
   
   // Streaks
   maxConsecutiveWins: number;
@@ -213,8 +221,8 @@ export interface DetailedStats {
 }
 
 export function calculateDetailedStats(trades: Trade[]): DetailedStats {
-  const closedTrades = trades.filter(t => t.exit_datetime !== null && t.exit_price !== null);
-  const metricsArray = closedTrades.map(t => ({
+  const closed = closedTrades(trades);
+  const metricsArray = closed.map(t => ({
     trade: t,
     metrics: calculateTradeMetrics(t),
   }));
@@ -232,8 +240,8 @@ export function calculateDetailedStats(trades: Trade[]): DetailedStats {
 
   // Daily aggregations
   const dailyData = new Map<string, { pnl: number; volume: number }>();
-  closedTrades.forEach(trade => {
-    const date = trade.exit_datetime!.split('T')[0];
+  closed.forEach(trade => {
+    const date = closedDayKey(trade)!;
     const metrics = calculateTradeMetrics(trade);
     const existing = dailyData.get(date);
     if (existing) {
@@ -250,11 +258,11 @@ export function calculateDetailedStats(trades: Trade[]): DetailedStats {
     : 0;
 
   // Per-share calculations
-  const totalShares = closedTrades.reduce((sum, t) => sum + Number(t.quantity), 0);
+  const totalShares = closed.reduce((sum, t) => sum + Number(t.quantity), 0);
   const avgPerShareGainLoss = totalShares > 0 ? totalGainLoss / totalShares : 0;
 
   // Averages
-  const avgTradeGainLoss = closedTrades.length > 0 ? totalGainLoss / closedTrades.length : 0;
+  const avgTradeGainLoss = closed.length > 0 ? totalGainLoss / closed.length : 0;
   const avgWinningTrade = winningTrades.length > 0 
     ? winningTrades.reduce((sum, m) => sum + m.metrics.netPnL, 0) / winningTrades.length 
     : 0;
@@ -263,31 +271,20 @@ export function calculateDetailedStats(trades: Trade[]): DetailedStats {
     : 0;
 
   // Rates
-  const winRate = closedTrades.length > 0 ? (winningTrades.length / closedTrades.length) * 100 : 0;
-  const lossRate = closedTrades.length > 0 ? (losingTrades.length / closedTrades.length) * 100 : 0;
-  const scratchRate = closedTrades.length > 0 ? (scratchTrades.length / closedTrades.length) * 100 : 0;
+  const winRate = closed.length > 0 ? (winningTrades.length / closed.length) * 100 : 0;
+  const lossRate = closed.length > 0 ? (losingTrades.length / closed.length) * 100 : 0;
+  const scratchRate = closed.length > 0 ? (scratchTrades.length / closed.length) * 100 : 0;
 
-  // Hold times (in minutes)
-  const calculateHoldTime = (t: Trade): number => {
-    const entry = new Date(t.entry_datetime);
-    const exit = new Date(t.exit_datetime!);
-    return (exit.getTime() - entry.getTime()) / (1000 * 60);
-  };
+  // Hold times (in minutes), skipping trades whose open time was estimated.
+  const mean_ = (values: number[]) =>
+    values.length > 0 ? values.reduce((sum, v) => sum + v, 0) / values.length : 0;
+  const holdTimes = (list: Trade[]) =>
+    list.map(holdMinutes).filter((m): m is number => m !== null);
 
-  const allHoldTimes = closedTrades.map(calculateHoldTime);
-  const avgHoldTimeMinutes = allHoldTimes.length > 0 
-    ? allHoldTimes.reduce((sum, h) => sum + h, 0) / allHoldTimes.length 
-    : 0;
-  
-  const winningHoldTimes = winningTrades.map(m => calculateHoldTime(m.trade));
-  const avgHoldTimeWinningMinutes = winningHoldTimes.length > 0 
-    ? winningHoldTimes.reduce((sum, h) => sum + h, 0) / winningHoldTimes.length 
-    : 0;
-
-  const losingHoldTimes = losingTrades.map(m => calculateHoldTime(m.trade));
-  const avgHoldTimeLosingMinutes = losingHoldTimes.length > 0 
-    ? losingHoldTimes.reduce((sum, h) => sum + h, 0) / losingHoldTimes.length 
-    : 0;
+  const allHoldTimes = holdTimes(closed);
+  const avgHoldTimeMinutes = mean_(allHoldTimes);
+  const avgHoldTimeWinningMinutes = mean_(holdTimes(winningTrades.map(m => m.trade)));
+  const avgHoldTimeLosingMinutes = mean_(holdTimes(losingTrades.map(m => m.trade)));
 
   // Streaks
   let maxConsecutiveWins = 0;
@@ -295,9 +292,7 @@ export function calculateDetailedStats(trades: Trade[]): DetailedStats {
   let currentWins = 0;
   let currentLosses = 0;
 
-  const sortedMetrics = [...closedTrades]
-    .sort((a, b) => new Date(a.exit_datetime!).getTime() - new Date(b.exit_datetime!).getTime())
-    .map(calculateTradeMetrics);
+  const sortedMetrics = [...closed].sort(compareByClose).map(calculateTradeMetrics);
 
   for (const m of sortedMetrics) {
     if (m.netPnL > 0) {
@@ -313,8 +308,8 @@ export function calculateDetailedStats(trades: Trade[]): DetailedStats {
 
   // Standard deviation of P/L
   const mean = avgTradeGainLoss;
-  const variance = closedTrades.length > 1
-    ? pnlValues.reduce((sum, p) => sum + Math.pow(p - mean, 2), 0) / (closedTrades.length - 1)
+  const variance = closed.length > 1
+    ? pnlValues.reduce((sum, p) => sum + Math.pow(p - mean, 2), 0) / (closed.length - 1)
     : 0;
   const tradePnLStdDev = Math.sqrt(variance);
 
@@ -333,8 +328,8 @@ export function calculateDetailedStats(trades: Trade[]): DetailedStats {
 
   // Probability of random chance (simplified t-test approximation)
   let probabilityOfRandomChance: number | null = null;
-  if (closedTrades.length >= 30 && tradePnLStdDev > 0) {
-    const tStat = Math.abs(mean / (tradePnLStdDev / Math.sqrt(closedTrades.length)));
+  if (closed.length >= 30 && tradePnLStdDev > 0) {
+    const tStat = Math.abs(mean / (tradePnLStdDev / Math.sqrt(closed.length)));
     // Approximate p-value (simplified)
     probabilityOfRandomChance = Math.min(100, Math.exp(-0.5 * tStat) * 100);
   }
@@ -349,7 +344,7 @@ export function calculateDetailedStats(trades: Trade[]): DetailedStats {
 
   // K-Ratio (simplified) = slope of equity curve / std dev of deviations from line
   let kRatio: number | null = null;
-  if (closedTrades.length >= 10) {
+  if (closed.length >= 10) {
     let cumulative = 0;
     const equityPoints = sortedMetrics.map((m, i) => {
       cumulative += m.netPnL;
@@ -378,16 +373,16 @@ export function calculateDetailedStats(trades: Trade[]): DetailedStats {
   const profitFactor = grossLoss > 0 ? grossProfit / grossLoss : grossProfit > 0 ? Infinity : 0;
 
   // Fees
-  const totalCommissions = closedTrades.reduce((sum, t) => sum + (Number(t.commissions) || 0), 0);
-  const totalFees = closedTrades.reduce((sum, t) => sum + (Number(t.fees) || 0), 0);
+  const totalCommissions = closed.reduce((sum, t) => sum + (Number(t.commissions) || 0), 0);
+  const totalFees = closed.reduce((sum, t) => sum + (Number(t.fees) || 0), 0);
 
   // MAE/MFE averages
-  const tradesWithMAE = closedTrades.filter(t => t.mae !== null);
+  const tradesWithMAE = closed.filter(t => t.mae !== null);
   const avgMAE = tradesWithMAE.length > 0
     ? tradesWithMAE.reduce((sum, t) => sum + (Number(t.mae) || 0), 0) / tradesWithMAE.length
     : null;
 
-  const tradesWithMFE = closedTrades.filter(t => t.mfe !== null);
+  const tradesWithMFE = closed.filter(t => t.mfe !== null);
   const avgMFE = tradesWithMFE.length > 0
     ? tradesWithMFE.reduce((sum, t) => sum + (Number(t.mfe) || 0), 0) / tradesWithMFE.length
     : null;
@@ -402,7 +397,7 @@ export function calculateDetailedStats(trades: Trade[]): DetailedStats {
     avgTradeGainLoss,
     avgWinningTrade,
     avgLosingTrade,
-    totalTrades: closedTrades.length,
+    totalTrades: closed.length,
     winningTrades: winningTrades.length,
     losingTrades: losingTrades.length,
     scratchTrades: scratchTrades.length,
@@ -412,6 +407,7 @@ export function calculateDetailedStats(trades: Trade[]): DetailedStats {
     avgHoldTimeMinutes,
     avgHoldTimeWinningMinutes,
     avgHoldTimeLosingMinutes,
+    holdTimeSampleSize: allHoldTimes.length,
     maxConsecutiveWins,
     maxConsecutiveLosses,
     tradePnLStdDev,
@@ -441,11 +437,10 @@ export function formatHoldTime(minutes: number): string {
 }
 
 export function calculateDailyStats(trades: Trade[]): DailyStats[] {
-  const closedTrades = trades.filter(t => t.exit_datetime !== null);
   const dailyMap = new Map<string, Trade[]>();
 
-  for (const trade of closedTrades) {
-    const date = trade.exit_datetime!.split('T')[0];
+  for (const trade of closedTrades(trades)) {
+    const date = closedDayKey(trade)!;
     if (!dailyMap.has(date)) {
       dailyMap.set(date, []);
     }

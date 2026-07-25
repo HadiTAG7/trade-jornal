@@ -4,6 +4,7 @@ import { Table, TableBody, TableCell, TableRow } from '@/components/ui/table';
 import { Trade } from '@/types/trade';
 import { calculateTradeMetrics, formatCurrency, formatPercent, formatHoldTime } from '@/lib/calculations';
 import { format } from 'date-fns';
+import { closedDayKey, closedTrades, compareByClose, holdMinutes } from '@/lib/tradeStatus';
 
 interface WinLosingDaysSectionProps {
   trades: Trade[];
@@ -43,12 +44,12 @@ interface DayStats {
 }
 
 function calculateDayTypeStats(trades: Trade[], isWinningDay: boolean): DayStats {
-  const closedTrades = trades.filter(t => t.exit_datetime !== null && t.exit_price !== null);
+  const closed = closedTrades(trades);
   
   // Group trades by day
   const dailyData = new Map<string, { pnl: number; trades: Trade[] }>();
-  closedTrades.forEach(trade => {
-    const date = trade.exit_datetime!.split('T')[0];
+  closed.forEach(trade => {
+    const date = closedDayKey(trade)!;
     const metrics = calculateTradeMetrics(trade);
     const existing = dailyData.get(date);
     if (existing) {
@@ -150,27 +151,15 @@ function calculateDayTypeStats(trades: Trade[], isWinningDay: boolean): DayStats
   const winRate = dayTrades.length > 0 ? (winningTrades.length / dayTrades.length) * 100 : 0;
   const lossRate = dayTrades.length > 0 ? (losingTrades.length / dayTrades.length) * 100 : 0;
 
-  // Hold times
-  const calculateHoldTime = (t: Trade): number => {
-    const entry = new Date(t.entry_datetime);
-    const exit = new Date(t.exit_datetime!);
-    return (exit.getTime() - entry.getTime()) / (1000 * 60);
+  // Hold times, skipping trades whose open time the broker didn't provide.
+  const avgHoldTime = (list: { trade: Trade }[]): number => {
+    const values = list.map(m => holdMinutes(m.trade)).filter((v): v is number => v !== null);
+    return values.length > 0 ? values.reduce((sum, v) => sum + v, 0) / values.length : 0;
   };
 
-  const winningHoldTimes = winningTrades.map(m => calculateHoldTime(m.trade));
-  const avgHoldTimeWinningMinutes = winningHoldTimes.length > 0 
-    ? winningHoldTimes.reduce((sum, h) => sum + h, 0) / winningHoldTimes.length 
-    : 0;
-
-  const losingHoldTimes = losingTrades.map(m => calculateHoldTime(m.trade));
-  const avgHoldTimeLosingMinutes = losingHoldTimes.length > 0 
-    ? losingHoldTimes.reduce((sum, h) => sum + h, 0) / losingHoldTimes.length 
-    : 0;
-
-  const scratchHoldTimes = scratchTrades.map(m => calculateHoldTime(m.trade));
-  const avgHoldTimeScratchMinutes = scratchHoldTimes.length > 0 
-    ? scratchHoldTimes.reduce((sum, h) => sum + h, 0) / scratchHoldTimes.length 
-    : 0;
+  const avgHoldTimeWinningMinutes = avgHoldTime(winningTrades);
+  const avgHoldTimeLosingMinutes = avgHoldTime(losingTrades);
+  const avgHoldTimeScratchMinutes = avgHoldTime(scratchTrades);
 
   // Standard deviation
   const mean = avgTradeGainLoss;
@@ -188,9 +177,7 @@ function calculateDayTypeStats(trades: Trade[], isWinningDay: boolean): DayStats
 
   // K-Ratio
   let kRatio: number | null = null;
-  const sortedMetrics = [...dayTrades]
-    .sort((a, b) => new Date(a.exit_datetime!).getTime() - new Date(b.exit_datetime!).getTime())
-    .map(calculateTradeMetrics);
+  const sortedMetrics = [...dayTrades].sort(compareByClose).map(calculateTradeMetrics);
 
   if (sortedMetrics.length >= 10) {
     let cumulative = 0;

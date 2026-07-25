@@ -24,6 +24,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { useTradeFilters } from '@/hooks/useTradeFilters';
 import { Trade, AnalyticsData, Strategy } from '@/types/trade';
 import { calculateAnalytics, calculateTradeMetrics, calculateDetailedStats, formatCurrency, formatPercent, formatR, formatHoldTime, DetailedStats } from '@/lib/calculations';
+import { closedAt, closedDayKey, closedTrades, holdMinutes, sortedClosedTrades } from '@/lib/tradeStatus';
 import { 
   AreaChart, 
   Area, 
@@ -144,20 +145,16 @@ export default function Dashboard() {
 
   // Generate equity curve data from filtered trades (Net P/L)
   const equityCurveData = (() => {
-    const closedTrades = filteredTrades.filter(t => t.exit_datetime !== null);
-    if (closedTrades.length === 0) return [];
-
-    const sorted = [...closedTrades].sort(
-      (a, b) => new Date(a.exit_datetime!).getTime() - new Date(b.exit_datetime!).getTime()
-    );
+    const sorted = sortedClosedTrades(filteredTrades);
+    if (sorted.length === 0) return [];
 
     let equity = 0;
     return sorted.map(trade => {
       const metrics = calculateTradeMetrics(trade);
       equity += metrics.netPnL;
       return {
-        date: format(new Date(trade.exit_datetime!), 'MMM d'),
-        fullDate: trade.exit_datetime!,
+        date: format(new Date(closedAt(trade)!), 'MMM d'),
+        fullDate: closedAt(trade)!,
         equity,
         pnl: metrics.netPnL,
       };
@@ -166,18 +163,14 @@ export default function Dashboard() {
 
   // Generate Gross Cumulative P/L chart data (uses filters) - includes both $ and R
   const grossCumulativePnLData = (() => {
-    const closedTrades = filteredTrades.filter(t => t.exit_datetime !== null);
-    if (closedTrades.length === 0) return [];
-
-    const sorted = [...closedTrades].sort(
-      (a, b) => new Date(a.exit_datetime!).getTime() - new Date(b.exit_datetime!).getTime()
-    );
+    const sorted = sortedClosedTrades(filteredTrades);
+    if (sorted.length === 0) return [];
 
     // Group by date for cleaner chart
     const dailyData = new Map<string, { grossPnL: number; grossR: number; date: Date }>();
     
     sorted.forEach(trade => {
-      const dateKey = format(new Date(trade.exit_datetime!), 'yyyy-MM-dd');
+      const dateKey = closedDayKey(trade)!;
       const metrics = calculateTradeMetrics(trade);
       const existing = dailyData.get(dateKey);
       if (existing) {
@@ -187,7 +180,7 @@ export default function Dashboard() {
         dailyData.set(dateKey, { 
           grossPnL: metrics.grossPnL, 
           grossR: metrics.realizedR ?? 0,
-          date: new Date(trade.exit_datetime!) 
+          date: new Date(closedAt(trade)!) 
         });
       }
     });
@@ -234,13 +227,13 @@ export default function Dashboard() {
 
   // Year/Month/Day distribution and performance data - includes both $ and R
   const timeGroupedData = (() => {
-    const closedTrades = filteredTrades.filter(t => t.exit_datetime !== null);
-    if (closedTrades.length === 0) return [];
+    const closed = closedTrades(filteredTrades);
+    if (closed.length === 0) return [];
 
     const grouped = new Map<string, { trades: number; pnl: number; rValue: number }>();
 
-    closedTrades.forEach(trade => {
-      const exitDate = new Date(trade.exit_datetime!);
+    closed.forEach(trade => {
+      const exitDate = new Date(closedAt(trade)!);
       let key: string;
       
       switch (timeGranularity) {
@@ -280,18 +273,14 @@ export default function Dashboard() {
 
   // Export filtered trades to Excel
   const exportToExcel = () => {
-    const closedTrades = filteredTrades.filter(t => t.exit_datetime !== null);
-    
-    const exportData = closedTrades.map(trade => {
+    const exportData = closedTrades(filteredTrades).map(trade => {
       const metrics = calculateTradeMetrics(trade);
-      const holdTimeMinutes = trade.exit_datetime && trade.entry_datetime
-        ? (new Date(trade.exit_datetime).getTime() - new Date(trade.entry_datetime).getTime()) / (1000 * 60)
-        : null;
+      const holdTimeMinutes = holdMinutes(trade);
       return {
         'Symbol': trade.symbol,
         'Side': trade.side,
         'Entry Date': trade.entry_datetime ? format(new Date(trade.entry_datetime), 'yyyy-MM-dd HH:mm:ss') : '',
-        'Exit Date': trade.exit_datetime ? format(new Date(trade.exit_datetime), 'yyyy-MM-dd HH:mm:ss') : '',
+        'Exit Date': closedAt(trade) ? format(new Date(closedAt(trade)!), 'yyyy-MM-dd HH:mm:ss') : '',
         'Entry Price': trade.entry_price,
         'Exit Price': trade.exit_price,
         'Quantity': trade.quantity,
