@@ -159,7 +159,7 @@ export function DayTimesSection({ trades }: DayTimesSectionProps) {
         const metrics = calculateTradeMetrics(trade);
         const existing = grouped.get(dayIndex)!;
         existing.trades += 1;
-        existing.pnl += metrics.grossPnL;
+        existing.pnl += metrics.netPnL;
       }
     });
 
@@ -192,9 +192,9 @@ export function DayTimesSection({ trades }: DayTimesSectionProps) {
       const existing = grouped.get(key);
       if (existing) {
         existing.trades += 1;
-        existing.pnl += metrics.grossPnL;
+        existing.pnl += metrics.netPnL;
       } else {
-        grouped.set(key, { trades: 1, pnl: metrics.grossPnL });
+        grouped.set(key, { trades: 1, pnl: metrics.netPnL });
       }
     });
 
@@ -234,7 +234,7 @@ export function DayTimesSection({ trades }: DayTimesSectionProps) {
       
       const existing = grouped.get(month)!;
       existing.trades += 1;
-      existing.pnl += metrics.grossPnL;
+      existing.pnl += metrics.netPnL;
     });
 
     return Array.from({ length: 12 }, (_, i) => ({
@@ -269,7 +269,7 @@ export function DayTimesSection({ trades }: DayTimesSectionProps) {
       const metrics = calculateTradeMetrics(trade);
       const existing = grouped.get(bucketLabel)!;
       existing.trades += 1;
-      existing.pnl += metrics.grossPnL;
+      existing.pnl += metrics.netPnL;
     });
 
     return DURATION_BUCKETS.map(bucket => ({

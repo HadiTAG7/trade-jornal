@@ -10,11 +10,11 @@ import {
 
 export function calculateTradeMetrics(trade: Trade): TradeMetrics {
   const entryPrice = Number(trade.entry_price);
-  const exitPrice = trade.exit_price ? Number(trade.exit_price) : null;
+  const exitPrice = trade.exit_price ?? null;
   const quantity = Number(trade.quantity);
   const fees = Number(trade.fees) || 0;
   const commissions = Number(trade.commissions) || 0;
-  const stopLoss = trade.stop_loss ? Number(trade.stop_loss) : null;
+  const stopLoss = trade.stop_loss ?? null;
 
   let grossPnL = 0;
   let netPnL = 0;
@@ -37,20 +37,25 @@ export function calculateTradeMetrics(trade: Trade): TradeMetrics {
     netPnL = grossPnL - fees - commissions;
   }
 
-  // Calculate planned risk
+  // Planned risk. `!= null` rather than truthiness: an explicit override of 0
+  // ("I risked nothing on this") is a real answer, not a missing one.
   let plannedRisk: number | null = null;
-  if (trade.planned_risk_override) {
+  if (trade.planned_risk_override != null) {
     plannedRisk = Number(trade.planned_risk_override);
   } else if (stopLoss !== null) {
     plannedRisk = Math.abs(entryPrice - stopLoss) * quantity;
   }
 
-  // Calculate realized R
+  // Realized R: the user's own override wins, then our own math off the planned
+  // risk, and only then the figure the broker reported — which is the broker's
+  // risk model, not ours, so it fills gaps rather than overriding.
   let realizedR: number | null = null;
-  if (trade.planned_r_override) {
+  if (trade.planned_r_override != null) {
     realizedR = Number(trade.planned_r_override);
-  } else if (plannedRisk && plannedRisk > 0) {
+  } else if (plannedRisk !== null && plannedRisk > 0) {
     realizedR = netPnL / plannedRisk;
+  } else if (trade.broker_r_multiple != null) {
+    realizedR = Number(trade.broker_r_multiple);
   }
 
   return {

@@ -48,6 +48,7 @@ import { WinLoseExpectationSection } from '@/components/dashboard/WinLoseExpecta
 import { WinLosingDaysSection } from '@/components/dashboard/WinLosingDaysSection';
 import { WinLosingDaysTimesSection } from '@/components/dashboard/WinLosingDaysTimesSection';
 import { WinLosingDaysPriceVolumeSection } from '@/components/dashboard/WinLosingDaysPriceVolumeSection';
+import { byId, toTrades } from '@/lib/tradeMapping';
 
 type DashboardView = 'overview' | 'detailed' | 'distribution' | 'win-losing-days';
 type DetailedSubView = 'stats' | 'day-times' | 'price-volume' | 'instrument' | 'win-lose-expectation';
@@ -102,22 +103,7 @@ export default function Dashboard() {
         fetchAll<Trade>(user.id, 'trades', 'entry_datetime', 'desc'),
         fetchAll<Strategy>(user.id, 'strategies'),
       ]);
-      const strategiesById = Object.fromEntries(allStrategies.map(s => [s.id, s]));
-
-      const typedTrades = allTrades.map(t => ({
-        ...t,
-        entry_price: Number(t.entry_price),
-        exit_price: t.exit_price ? Number(t.exit_price) : null,
-        quantity: Number(t.quantity),
-        fees: Number(t.fees) || 0,
-        commissions: Number(t.commissions) || 0,
-        stop_loss: t.stop_loss ? Number(t.stop_loss) : null,
-        planned_risk_override: t.planned_risk_override ? Number(t.planned_risk_override) : null,
-        planned_r_override: t.planned_r_override ? Number(t.planned_r_override) : null,
-        mae: t.mae ? Number(t.mae) : null,
-        mfe: t.mfe ? Number(t.mfe) : null,
-        strategy: t.strategy_id ? strategiesById[t.strategy_id] : undefined,
-      })) as Trade[];
+      const typedTrades = toTrades(allTrades, { strategiesById: byId(allStrategies) });
 
       setTrades(typedTrades);
       syncWidgetData(typedTrades);
@@ -161,25 +147,25 @@ export default function Dashboard() {
     });
   })();
 
-  // Generate Gross Cumulative P/L chart data (uses filters) - includes both $ and R
-  const grossCumulativePnLData = (() => {
+  // Cumulative net P/L chart data (uses filters) - includes both $ and R
+  const cumulativePnLData = (() => {
     const sorted = sortedClosedTrades(filteredTrades);
     if (sorted.length === 0) return [];
 
     // Group by date for cleaner chart
-    const dailyData = new Map<string, { grossPnL: number; grossR: number; date: Date }>();
+    const dailyData = new Map<string, { netPnL: number; r: number; date: Date }>();
     
     sorted.forEach(trade => {
       const dateKey = closedDayKey(trade)!;
       const metrics = calculateTradeMetrics(trade);
       const existing = dailyData.get(dateKey);
       if (existing) {
-        existing.grossPnL += metrics.grossPnL;
-        existing.grossR += metrics.realizedR ?? 0;
+        existing.netPnL += metrics.netPnL;
+        existing.r += metrics.realizedR ?? 0;
       } else {
         dailyData.set(dateKey, { 
-          grossPnL: metrics.grossPnL, 
-          grossR: metrics.realizedR ?? 0,
+          netPnL: metrics.netPnL, 
+          r: metrics.realizedR ?? 0,
           date: new Date(closedAt(trade)!) 
         });
       }
@@ -193,14 +179,14 @@ export default function Dashboard() {
     Array.from(dailyData.entries())
       .sort(([a], [b]) => a.localeCompare(b))
       .forEach(([dateKey, data]) => {
-        cumulativePnL += data.grossPnL;
-        cumulativeR += data.grossR;
+        cumulativePnL += data.netPnL;
+        cumulativeR += data.r;
         result.push({
           date: format(data.date, 'yyyy-MM-dd'),
           cumulative: cumulativePnL,
           cumulativeR: cumulativeR,
-          dailyPnL: data.grossPnL,
-          dailyR: data.grossR,
+          dailyPnL: data.netPnL,
+          dailyR: data.r,
         });
       });
 
@@ -208,21 +194,23 @@ export default function Dashboard() {
   })();
 
   // Determine chart title based on filter state and display mode
-  const getGrossChartTitle = () => {
-    const valueLabel = displayMode === 'dollars' ? 'P&L' : 'R';
+  const getCumulativeChartTitle = () => {
+    // Net, like every other figure on this page. It used to say "Gross" while
+    // the KPI cards directly above it were net, so one dashboard showed two bases.
+    const valueLabel = displayMode === 'dollars' ? 'Net P&L' : 'R';
     if (!hasActiveFilters) {
-      return `Gross Cumulative ${valueLabel} (All Time)`;
+      return `Cumulative ${valueLabel} (All Time)`;
     }
     if (filters.dateFrom && filters.dateTo) {
-      return `Gross Cumulative ${valueLabel} (${format(new Date(filters.dateFrom), 'MMM d, yyyy')} - ${format(new Date(filters.dateTo), 'MMM d, yyyy')})`;
+      return `Cumulative ${valueLabel} (${format(new Date(filters.dateFrom), 'MMM d, yyyy')} - ${format(new Date(filters.dateTo), 'MMM d, yyyy')})`;
     }
     if (filters.dateFrom) {
-      return `Gross Cumulative ${valueLabel} (From ${format(new Date(filters.dateFrom), 'MMM d, yyyy')})`;
+      return `Cumulative ${valueLabel} (From ${format(new Date(filters.dateFrom), 'MMM d, yyyy')})`;
     }
     if (filters.dateTo) {
-      return `Gross Cumulative ${valueLabel} (Until ${format(new Date(filters.dateTo), 'MMM d, yyyy')})`;
+      return `Cumulative ${valueLabel} (Until ${format(new Date(filters.dateTo), 'MMM d, yyyy')})`;
     }
-    return `Gross Cumulative ${valueLabel} (Filtered)`;
+    return `Cumulative ${valueLabel} (Filtered)`;
   };
 
   // Year/Month/Day distribution and performance data - includes both $ and R
@@ -252,10 +240,10 @@ export default function Dashboard() {
       const existing = grouped.get(key);
       if (existing) {
         existing.trades += 1;
-        existing.pnl += metrics.grossPnL;
+        existing.pnl += metrics.netPnL;
         existing.rValue += metrics.realizedR ?? 0;
       } else {
-        grouped.set(key, { trades: 1, pnl: metrics.grossPnL, rValue: metrics.realizedR ?? 0 });
+        grouped.set(key, { trades: 1, pnl: metrics.netPnL, rValue: metrics.realizedR ?? 0 });
       }
     });
 
@@ -420,26 +408,26 @@ export default function Dashboard() {
 
             {/* Charts & Tables */}
             <div className="grid gap-6 lg:grid-cols-2">
-              {/* Gross Cumulative P/L Chart */}
+              {/* Cumulative net P/L chart */}
               <Card className="lg:col-span-2">
                 <CardHeader>
-                  <CardTitle>{getGrossChartTitle()}</CardTitle>
+                  <CardTitle>{getCumulativeChartTitle()}</CardTitle>
                   <CardDescription>
                     {hasActiveFilters 
-                      ? `Showing ${grossCumulativePnLData.length} trading days based on active filters`
+                      ? `Showing ${cumulativePnLData.length} trading days based on active filters`
                       : displayMode === 'dollars' 
-                        ? 'Cumulative gross profit/loss across your entire trading history'
+                        ? 'Cumulative net profit/loss across your entire trading history'
                         : 'Cumulative R-multiple performance across your entire trading history'
                     }
                   </CardDescription>
                 </CardHeader>
                 <CardContent>
-                  {grossCumulativePnLData.length > 0 ? (
+                  {cumulativePnLData.length > 0 ? (
                     <div className="h-[300px]">
                       <ResponsiveContainer width="100%" height="100%">
-                        <AreaChart data={grossCumulativePnLData}>
+                        <AreaChart data={cumulativePnLData}>
                           <defs>
-                            <linearGradient id="colorGrossPnL" x1="0" y1="0" x2="0" y2="1">
+                            <linearGradient id="colorNetPnL" x1="0" y1="0" x2="0" y2="1">
                               <stop offset="5%" stopColor="hsl(var(--profit))" stopOpacity={0.3} />
                               <stop offset="95%" stopColor="hsl(var(--profit))" stopOpacity={0} />
                             </linearGradient>
@@ -453,7 +441,7 @@ export default function Dashboard() {
                             interval="preserveStartEnd"
                             tickFormatter={(value) => {
                               const date = new Date(value);
-                              if (grossCumulativePnLData.length > 90) {
+                              if (cumulativePnLData.length > 90) {
                                 return format(date, 'MMM yyyy');
                               }
                               return format(date, 'MMM d');
@@ -496,7 +484,7 @@ export default function Dashboard() {
                             dataKey={displayMode === 'dollars' ? 'cumulative' : 'cumulativeR'}
                             stroke="hsl(var(--profit))"
                             strokeWidth={2}
-                            fill="url(#colorGrossPnL)"
+                            fill="url(#colorNetPnL)"
                           />
                         </AreaChart>
                       </ResponsiveContainer>
@@ -664,7 +652,14 @@ export default function Dashboard() {
                             <TableCell className="text-right font-mono font-medium">{detailedStats.totalTrades}</TableCell>
                           </TableRow>
                           <TableRow>
-                            <TableCell className="text-muted-foreground">Avg Hold Time (scratch trades)</TableCell>
+                            <TableCell className="text-muted-foreground">
+                              Average Hold Time
+                              {detailedStats.holdTimeSampleSize < detailedStats.totalTrades && (
+                                <span className="ml-1 text-xs">
+                                  ({detailedStats.holdTimeSampleSize} of {detailedStats.totalTrades} with a known open time)
+                                </span>
+                              )}
+                            </TableCell>
                             <TableCell className="text-right font-mono font-medium">{formatHoldTime(detailedStats.avgHoldTimeMinutes)}</TableCell>
                           </TableRow>
                           <TableRow>
@@ -917,7 +912,7 @@ export default function Dashboard() {
                 <CardHeader>
                   <CardTitle className="text-base">Performance by {timeGranularity.charAt(0).toUpperCase() + timeGranularity.slice(1)}</CardTitle>
                   <CardDescription>
-                    {displayMode === 'dollars' ? 'Gross P/L' : 'R-Multiple'} per {timeGranularity}
+                    {displayMode === 'dollars' ? 'Net P/L' : 'R-Multiple'} per {timeGranularity}
                   </CardDescription>
                 </CardHeader>
                 <CardContent>

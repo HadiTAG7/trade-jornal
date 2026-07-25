@@ -13,6 +13,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { JournalEntry, DailyStats, Trade } from '@/types/trade';
 import { calculateDailyStats, formatCurrency, formatR } from '@/lib/calculations';
 import { cn } from '@/lib/utils';
+import { byId, toTrades } from '@/lib/tradeMapping';
 
 export default function Journal() {
   const { user } = useAuth();
@@ -48,14 +49,7 @@ export default function Journal() {
     try {
       const data = await fetchAll<Trade>(user!.id, 'trades');
 
-      const typedTrades = data.map(t => ({
-        ...t,
-        entry_price: Number(t.entry_price),
-        exit_price: t.exit_price ? Number(t.exit_price) : null,
-        quantity: Number(t.quantity),
-        fees: Number(t.fees) || 0,
-        commissions: Number(t.commissions) || 0,
-      })) as Trade[];
+      const typedTrades = toTrades(data);
       
       setTrades(typedTrades);
     } catch (error) {

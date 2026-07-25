@@ -162,7 +162,7 @@ export function PriceVolumeSection({ trades }: PriceVolumeSectionProps) {
       const metrics = calculateTradeMetrics(trade);
       const existing = grouped.get(bucketLabel)!;
       existing.trades += 1;
-      existing.pnl += metrics.grossPnL;
+      existing.pnl += metrics.netPnL;
     });
 
     return PRICE_BUCKETS.map(bucket => ({
@@ -198,7 +198,7 @@ export function PriceVolumeSection({ trades }: PriceVolumeSectionProps) {
       const metrics = calculateTradeMetrics(trade);
       const existing = grouped.get(bucketLabel)!;
       existing.trades += 1;
-      existing.pnl += metrics.grossPnL;
+      existing.pnl += metrics.netPnL;
     });
 
     return PRICE_RANGE_BUCKETS.map(bucket => ({

@@ -57,6 +57,7 @@ import { isFullyClosed, openQuantity } from '@/lib/tradeStatus';
 import { format, differenceInMinutes, differenceInHours, differenceInDays } from 'date-fns';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
+import { byId, toTrades } from '@/lib/tradeMapping';
 
 // Format trade duration
 const formatDuration = (entryDate: string, exitDate: string | null): string => {
@@ -126,22 +127,10 @@ export default function Trades() {
         fetchAll<Strategy>(user.id, 'strategies'),
         fetchAll<Account>(user.id, 'accounts'),
       ]);
-      const strategiesById = Object.fromEntries(allStrategies.map(s => [s.id, s]));
-      const accountsById = Object.fromEntries(allAccounts.map(a => [a.id, a]));
-
-      const typedTrades = allTrades.map(t => ({
-        ...t,
-        entry_price: Number(t.entry_price),
-        exit_price: t.exit_price ? Number(t.exit_price) : null,
-        quantity: Number(t.quantity),
-        fees: Number(t.fees) || 0,
-        commissions: Number(t.commissions) || 0,
-        stop_loss: t.stop_loss ? Number(t.stop_loss) : null,
-        planned_risk_override: t.planned_risk_override ? Number(t.planned_risk_override) : null,
-        planned_r_override: t.planned_r_override ? Number(t.planned_r_override) : null,
-        strategy: t.strategy_id ? strategiesById[t.strategy_id] : undefined,
-        account: t.account_id ? accountsById[t.account_id] : undefined,
-      })) as Trade[];
+      const typedTrades = toTrades(allTrades, {
+        strategiesById: byId(allStrategies),
+        accountsById: byId(allAccounts),
+      });
 
       setTrades(typedTrades);
     } catch (error) {

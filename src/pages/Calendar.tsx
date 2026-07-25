@@ -12,6 +12,7 @@ import { closedDayKey } from '@/lib/tradeStatus';
 import { syncWidgetData } from '@/lib/widgetData';
 import { format, startOfMonth, endOfMonth, eachDayOfInterval, addMonths, subMonths, setYear, getYear, isSameMonth, isToday, startOfYear, endOfYear, eachMonthOfInterval, startOfWeek, endOfWeek } from 'date-fns';
 import { cn } from '@/lib/utils';
+import { byId, toTrades } from '@/lib/tradeMapping';
 
 // Generate year options (10 years back, 5 years forward)
 const generateYearOptions = () => {
@@ -55,17 +56,8 @@ export default function CalendarPage() {
       
       const data = await fetchTradesByCloseRange<Trade>(user!.id, yearStart, yearEnd);
 
-      const typedTrades = data.map(t => ({
-        ...t,
-        entry_price: Number(t.entry_price),
-        exit_price: t.exit_price ? Number(t.exit_price) : null,
-        quantity: Number(t.quantity),
-        fees: Number(t.fees) || 0,
-        commissions: Number(t.commissions) || 0,
-        stop_loss: t.stop_loss ? Number(t.stop_loss) : null,
-      })) as Trade[];
-      
-      console.log('Fetched trades for year', year, ':', typedTrades.length, 'trades');
+      const typedTrades = toTrades(data);
+
       setTrades(typedTrades);
       syncWidgetData(typedTrades);
     } catch (error) {
