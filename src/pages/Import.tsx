@@ -7,7 +7,9 @@ import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useToast } from '@/hooks/use-toast';
-import { fetchAll, importTradesByHash, insertItem } from '@/lib/db';
+import { fetchAll as dbFetchAll, importTradesByHash, insertItem } from '@/lib/db';
+import { markDuplicates } from '@/lib/duplicates';
+import { Trade } from '@/types/trade';
 import { useAuth } from '@/contexts/AuthContext';
 import { generateStableHash } from '@/lib/calculations';
 import { parseTOSAccountStatement, TIMEZONE_OPTIONS, ReconstructedTrade, TOSParseResult } from '@/lib/tosAccountStatementParser';
@@ -53,6 +55,7 @@ interface ParsedTrade {
   mae: number | null;
   stable_hash: string;
   isDuplicate?: boolean;
+  duplicateReason?: string;
   calculated_exit_price?: number | null;
   grossPnL?: number;
   netPnL?: number;
@@ -264,13 +267,13 @@ export default function Import() {
       duration: t.duration,
     }));
 
-    // Check for duplicates
-    const existingTrades = await fetchAll<{ stable_hash: string | null }>(user!.id, 'trades');
-
-    const existingHashes = new Set(existingTrades.map(t => t.stable_hash));
-    
-    trades.forEach(trade => {
-      trade.isDuplicate = existingHashes.has(trade.stable_hash);
+    // Duplicate check. Matches the trade itself, not just the import hash, so
+    // trades the broker sync already pulled are recognised — they carry no
+    // stable_hash, so the old check could never see them.
+    const existingTrades = await dbFetchAll<Trade>(user!.id, 'trades');
+    markDuplicates(trades, existingTrades).forEach((m, i) => {
+      trades[i].isDuplicate = m.isDuplicate;
+      trades[i].duplicateReason = m.duplicateReason;
     });
 
     setParsedTrades(trades);
@@ -409,13 +412,13 @@ export default function Import() {
       }
     }
 
-    // Check for duplicates
-    const existingTrades = await fetchAll<{ stable_hash: string | null }>(user!.id, 'trades');
-
-    const existingHashes = new Set(existingTrades.map(t => t.stable_hash));
-    
-    trades.forEach(trade => {
-      trade.isDuplicate = existingHashes.has(trade.stable_hash);
+    // Duplicate check. Matches the trade itself, not just the import hash, so
+    // trades the broker sync already pulled are recognised — they carry no
+    // stable_hash, so the old check could never see them.
+    const existingTrades = await dbFetchAll<Trade>(user!.id, 'trades');
+    markDuplicates(trades, existingTrades).forEach((m, i) => {
+      trades[i].isDuplicate = m.isDuplicate;
+      trades[i].duplicateReason = m.duplicateReason;
     });
 
     setParsedTrades(trades);
@@ -448,8 +451,12 @@ export default function Import() {
           source: source === 'ThinkOrSwim-AccountStatement' ? 'ThinkOrSwim' : source,
         }));
 
-        // stable_hash is the document ID, so duplicates are impossible
-        actuallyImported = await importTradesByHash(user!.id, tradesToInsert);
+        // stable_hash is the document id. Passing the ids already stored keeps
+        // an existing document's created_at instead of resetting it to now.
+        const existingIds = new Set(
+          (await dbFetchAll<Trade>(user!.id, 'trades')).map((t) => t.id),
+        );
+        actuallyImported = await importTradesByHash(user!.id, tradesToInsert, existingIds);
       }
 
       // Log the import - use 'ThinkOrSwim' for account statement imports
@@ -735,12 +742,21 @@ export default function Import() {
                       )}>
                         <td className="p-2">
                           {trade.isDuplicate ? (
-                            <AlertCircle className="h-4 w-4 text-warning" />
+                            <span title={trade.duplicateReason || 'Duplicate — will be skipped'}>
+                              <AlertCircle className="h-4 w-4 text-warning" />
+                            </span>
                           ) : (
                             <CheckCircle className="h-4 w-4 text-profit" />
                           )}
                         </td>
-                        <td className="p-2 font-medium">{trade.symbol}</td>
+                        <td className="p-2 font-medium">
+                          {trade.symbol}
+                          {trade.isDuplicate && trade.duplicateReason && (
+                            <span className="block text-[11px] font-normal text-muted-foreground">
+                              {trade.duplicateReason}
+                            </span>
+                          )}
+                        </td>
                         <td className="p-2">
                           <Badge variant={trade.side === 'LONG' ? 'default' : 'secondary'}>
                             {trade.side}
