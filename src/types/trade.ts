@@ -50,6 +50,10 @@ export interface Trade {
   // R multiple as the broker reported it (kept separate from the user's own
   // `planned_r_override` so a sync never overwrites a manual value).
   broker_r_multiple?: number | null;
+  // The broker log's own `source` for this trade ("*_bot", "manual", …), which
+  // is what the bot-vs-manual split reads when no strategy has been assigned.
+  broker_source?: string | null;
+  broker_order_id?: string | null;
   mae: number | null;
   mfe: number | null;
   notes: string | null;
