@@ -58,6 +58,7 @@ import { format, differenceInMinutes, differenceInHours, differenceInDays } from
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
 import { byId, toTrades } from '@/lib/tradeMapping';
+import { loadList } from '@/lib/safeLoad';
 
 // Format trade duration
 const formatDuration = (entryDate: string, exitDate: string | null): string => {
@@ -142,12 +143,12 @@ export default function Trades() {
 
   const fetchStrategies = async () => {
     if (!user) return;
-    setStrategies(await fetchAll<Strategy>(user.id, 'strategies').catch(() => []));
+    setStrategies(await loadList('strategies', () => fetchAll<Strategy>(user.id, 'strategies')));
   };
 
   const fetchAccounts = async () => {
     if (!user) return;
-    setAccounts(await fetchAll<Account>(user.id, 'accounts').catch(() => []));
+    setAccounts(await loadList('accounts', () => fetchAll<Account>(user.id, 'accounts')));
   };
 
   const filteredTrades = filterTrades(trades);

@@ -62,12 +62,44 @@ jobs:
             echo "Using existing signing keystore from the repo."
           fi
 
+      # Release, not debug: a debug APK carries android:debuggable and is not
+      # what should be handed out. Both build types use the same signing config,
+      # so the certificate is unchanged and this still installs over the
+      # currently installed app — the verification step below proves that.
       - name: Build APK
         working-directory: android
-        run: ./gradlew assembleDebug
+        run: >-
+          ./gradlew assembleRelease
+          -PtradelogVersionCode=${{ github.run_number }}
+          -PtradelogVersionName=1.0.${{ github.run_number }}
 
       - name: Rename APK
-        run: cp android/app/build/outputs/apk/debug/app-debug.apk TradeLog.apk
+        run: cp android/app/build/outputs/apk/release/app-release.apk TradeLog.apk
+
+      # An APK signed by a different key cannot install over the existing app —
+      # Android rejects it and the only way out is uninstalling first, losing
+      # nothing here but requiring a manual step nobody expects. So fail the
+      # build rather than publish an APK whose signer isn't the repo keystore.
+      - name: Verify APK signature matches the release keystore
+        run: |
+          set -euo pipefail
+          APKSIGNER=$(ls "$ANDROID_HOME"/build-tools/*/apksigner | sort -V | tail -1)
+          "$APKSIGNER" verify --verbose TradeLog.apk
+
+          expected=$(keytool -list -v \
+            -keystore android/app/tradelog-release.keystore \
+            -alias tradelog -storepass tradelog2026 \
+            | awk '/SHA256:/ { print $2; exit }' | tr -d ':' | tr 'A-Z' 'a-z')
+          actual=$("$APKSIGNER" verify --print-certs TradeLog.apk \
+            | awk '/SHA-256 digest:/ { print $NF; exit }')
+
+          echo "keystore certificate: $expected"
+          echo "APK signer:           $actual"
+          if [ -z "$expected" ] || [ "$expected" != "$actual" ]; then
+            echo "::error::APK is not signed with the repo release keystore; it would not install over the existing app."
+            exit 1
+          fi
+          echo "Signature matches — this APK installs over the existing app."
 
       - name: Upload APK
         uses: actions/upload-artifact@v4

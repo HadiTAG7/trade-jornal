@@ -21,6 +21,7 @@ import { ExecutionsEditor } from '@/components/trades/ExecutionsEditor';
 import { aggregateFromExecutions } from '@/lib/executions';
 import { toast } from 'sonner';
 import { format } from 'date-fns';
+import { loadList } from '@/lib/safeLoad';
 
 export default function TradeDetail() {
   const { id } = useParams<{ id: string }>();
@@ -113,12 +114,12 @@ export default function TradeDetail() {
 
   const fetchStrategies = async () => {
     if (!user) return;
-    setStrategies(await fetchAll<Strategy>(user.id, 'strategies').catch(() => []));
+    setStrategies(await loadList('strategies', () => fetchAll<Strategy>(user.id, 'strategies')));
   };
 
   const fetchAccounts = async () => {
     if (!user) return;
-    setAccounts(await fetchAll<Account>(user.id, 'accounts').catch(() => []));
+    setAccounts(await loadList('accounts', () => fetchAll<Account>(user.id, 'accounts')));
   };
 
   const handleChange = (field: string, value: string) => {

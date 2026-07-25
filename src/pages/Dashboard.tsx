@@ -49,6 +49,7 @@ import { WinLosingDaysSection } from '@/components/dashboard/WinLosingDaysSectio
 import { WinLosingDaysTimesSection } from '@/components/dashboard/WinLosingDaysTimesSection';
 import { WinLosingDaysPriceVolumeSection } from '@/components/dashboard/WinLosingDaysPriceVolumeSection';
 import { byId, toTrades } from '@/lib/tradeMapping';
+import { loadList } from '@/lib/safeLoad';
 
 type DashboardView = 'overview' | 'detailed' | 'distribution' | 'win-losing-days';
 type DetailedSubView = 'stats' | 'day-times' | 'price-volume' | 'instrument' | 'win-lose-expectation';
@@ -116,7 +117,7 @@ export default function Dashboard() {
 
   const fetchStrategies = async () => {
     if (!user) return;
-    setStrategies(await fetchAll<Strategy>(user.id, 'strategies').catch(() => []));
+    setStrategies(await loadList('strategies', () => fetchAll<Strategy>(user.id, 'strategies')));
   };
 
   // Apply filters to trades and recalculate analytics
