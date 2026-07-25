@@ -10,4 +10,34 @@
         android:layout_height="match_parent"
         android:scaleType="fitXY"
         android:contentDescription="@string/app_name" />
+
+    <!-- Month navigation, overlaid on the bitmap's reserved top-right area -->
+    <LinearLayout
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="top|end"
+        android:orientation="horizontal"
+        android:paddingTop="6dp"
+        android:paddingEnd="8dp">
+
+        <TextView
+            android:id="@+id/widget_prev"
+            android:layout_width="40dp"
+            android:layout_height="34dp"
+            android:gravity="center"
+            android:text="‹"
+            android:textColor="#94A3B8"
+            android:textSize="22sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:id="@+id/widget_next"
+            android:layout_width="40dp"
+            android:layout_height="34dp"
+            android:gravity="center"
+            android:text="›"
+            android:textColor="#94A3B8"
+            android:textSize="22sp"
+            android:textStyle="bold" />
+    </LinearLayout>
 </FrameLayout>

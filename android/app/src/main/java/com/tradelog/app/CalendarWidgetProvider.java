@@ -18,27 +18,56 @@ import android.widget.RemoteViews;
 
 import org.json.JSONObject;
 
+import java.util.ArrayList;
 import java.util.Calendar;
+import java.util.List;
 import java.util.Locale;
 
 /**
- * Home-screen widget: renders the current month's daily P&L calendar from
- * data the web app caches in Capacitor's SharedPreferences ("CapacitorStorage",
- * key "widget_calendar_data"). The bitmap is rendered at the widget's real
- * pixel size so it stays crisp, and the design mirrors the in-app calendar.
+ * Home-screen widget: the trading month as a weekday-only P&L grid (Mon–Fri)
+ * plus a weekly total column, with arrows to move between months. Data comes
+ * from what the web app caches in Capacitor's SharedPreferences
+ * ("CapacitorStorage", key "widget_calendar_data").
  */
 public class CalendarWidgetProvider extends AppWidgetProvider {
+
+    private static final String ACTION_PREV = "com.tradelog.app.WIDGET_PREV_MONTH";
+    private static final String ACTION_NEXT = "com.tradelog.app.WIDGET_NEXT_MONTH";
+    private static final String PREFS = "tradelog_widget";
+    private static final String KEY_OFFSET = "month_offset_";
 
     // In-app dark palette
     private static final int BG = Color.parseColor("#0D1425");
     private static final int CELL = Color.parseColor("#151D31");
     private static final int CELL_PROFIT = Color.parseColor("#11382E");
     private static final int CELL_LOSS = Color.parseColor("#42232A");
+    private static final int WEEK_CELL = Color.parseColor("#101828");
+    private static final int WEEK_BORDER = Color.parseColor("#22304A");
     private static final int TEXT = Color.parseColor("#F1F5F9");
     private static final int TEXT_DIM = Color.parseColor("#5B6B84");
     private static final int GREEN = Color.parseColor("#2DD4BF");
     private static final int GREEN_SOFT = Color.parseColor("#34D399");
     private static final int RED_SOFT = Color.parseColor("#F87171");
+
+    @Override
+    public void onReceive(Context context, Intent intent) {
+        final String action = intent.getAction();
+        if (ACTION_PREV.equals(action) || ACTION_NEXT.equals(action)) {
+            int id = intent.getIntExtra(AppWidgetManager.EXTRA_APPWIDGET_ID,
+                    AppWidgetManager.INVALID_APPWIDGET_ID);
+            if (id != AppWidgetManager.INVALID_APPWIDGET_ID) {
+                SharedPreferences prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
+                int offset = prefs.getInt(KEY_OFFSET + id, 0) + (ACTION_NEXT.equals(action) ? 1 : -1);
+                // Keep navigation within a sensible range.
+                if (offset > 12) offset = 12;
+                if (offset < -60) offset = -60;
+                prefs.edit().putInt(KEY_OFFSET + id, offset).apply();
+                updateOne(context, AppWidgetManager.getInstance(context), id);
+            }
+            return;
+        }
+        super.onReceive(context, intent);
+    }
 
     @Override
     public void onUpdate(Context context, AppWidgetManager manager, int[] widgetIds) {
@@ -52,20 +81,40 @@ public class CalendarWidgetProvider extends AppWidgetProvider {
         updateOne(context, manager, widgetId);
     }
 
+    @Override
+    public void onDeleted(Context context, int[] widgetIds) {
+        SharedPreferences.Editor e = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit();
+        for (int id : widgetIds) e.remove(KEY_OFFSET + id);
+        e.apply();
+    }
+
     private void updateOne(Context context, AppWidgetManager manager, int id) {
         RemoteViews views = new RemoteViews(context.getPackageName(), R.layout.widget_calendar);
 
+        int monthOffset = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+                .getInt(KEY_OFFSET + id, 0);
         int[] size = widgetPixelSize(context, manager, id);
-        views.setImageViewBitmap(R.id.widget_image, renderCalendar(context, size[0], size[1]));
+        views.setImageViewBitmap(R.id.widget_image, renderCalendar(context, size[0], size[1], monthOffset));
 
         Intent open = context.getPackageManager().getLaunchIntentForPackage(context.getPackageName());
         if (open != null) {
-            PendingIntent pi = PendingIntent.getActivity(
+            views.setOnClickPendingIntent(R.id.widget_image, PendingIntent.getActivity(
                     context, 0, open,
-                    PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
-            views.setOnClickPendingIntent(R.id.widget_root, pi);
+                    PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE));
         }
+        views.setOnClickPendingIntent(R.id.widget_prev, navIntent(context, id, ACTION_PREV));
+        views.setOnClickPendingIntent(R.id.widget_next, navIntent(context, id, ACTION_NEXT));
+
         manager.updateAppWidget(id, views);
+    }
+
+    private PendingIntent navIntent(Context context, int widgetId, String action) {
+        Intent intent = new Intent(context, CalendarWidgetProvider.class);
+        intent.setAction(action);
+        intent.putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, widgetId);
+        int requestCode = widgetId * 10 + (ACTION_NEXT.equals(action) ? 1 : 2);
+        return PendingIntent.getBroadcast(context, requestCode, intent,
+                PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
     }
 
     static void refreshAll(Context context) {
@@ -79,41 +128,91 @@ public class CalendarWidgetProvider extends AppWidgetProvider {
     private static int[] widgetPixelSize(Context context, AppWidgetManager manager, int id) {
         float density = context.getResources().getDisplayMetrics().density;
         Bundle opts = manager.getAppWidgetOptions(id);
-        int wDp = opts.getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_WIDTH);
-        int hDp = opts.getInt(AppWidgetManager.OPTION_APPWIDGET_MAX_HEIGHT);
-        int w = Math.round(wDp * density);
-        int h = Math.round(hDp * density);
+        int w = Math.round(opts.getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_WIDTH) * density);
+        int h = Math.round(opts.getInt(AppWidgetManager.OPTION_APPWIDGET_MAX_HEIGHT) * density);
         if (w < 200) w = 900;
         if (h < 200) h = 700;
-        // Cap to keep RemoteViews bitmaps well under the transport limit
         float cap = 1300f / Math.max(w, h);
         if (cap < 1f) { w = Math.round(w * cap); h = Math.round(h * cap); }
         return new int[]{w, h};
     }
 
-    private Bitmap renderCalendar(Context context, int w, int h) {
-        JSONObject days = loadDays(context);
+    /** One Mon–Fri row: day numbers (0 when outside the month) and their P&L. */
+    private static class Week {
+        final int[] days = new int[5];
+        final Long[] values = new Long[5];
+        boolean hasData;
+        long total;
+    }
+
+    private static List<Week> buildWeeks(JSONObject data, int year, int month) {
+        Calendar cal = Calendar.getInstance();
+        cal.clear();
+        cal.set(year, month, 1);
+        int daysInMonth = cal.getActualMaximum(Calendar.DAY_OF_MONTH);
+
+        // Step back to the Monday of the week containing the 1st.
+        int dow = cal.get(Calendar.DAY_OF_WEEK);
+        int toMonday = (dow == Calendar.SUNDAY) ? -6 : (Calendar.MONDAY - dow);
+        cal.add(Calendar.DAY_OF_MONTH, toMonday);
+
+        List<Week> weeks = new ArrayList<>();
+        while (true) {
+            Week week = new Week();
+            boolean anyInMonth = false;
+            Calendar day = (Calendar) cal.clone();
+            for (int i = 0; i < 5; i++) { // Mon..Fri
+                boolean inMonth = day.get(Calendar.MONTH) == month && day.get(Calendar.YEAR) == year;
+                if (inMonth) {
+                    int d = day.get(Calendar.DAY_OF_MONTH);
+                    week.days[i] = d;
+                    Long v = dayValue(data, year, month, d);
+                    week.values[i] = v;
+                    if (v != null) {
+                        week.hasData = true;
+                        week.total += v;
+                    }
+                    anyInMonth = true;
+                }
+                day.add(Calendar.DAY_OF_MONTH, 1);
+            }
+            if (anyInMonth) weeks.add(week);
+
+            cal.add(Calendar.DAY_OF_MONTH, 7);
+            // Stop once the week's Monday is past the end of the month.
+            Calendar monthEnd = Calendar.getInstance();
+            monthEnd.clear();
+            monthEnd.set(year, month, daysInMonth);
+            if (cal.after(monthEnd)) break;
+        }
+        return weeks;
+    }
+
+    private Bitmap renderCalendar(Context context, int w, int h, int monthOffset) {
+        JSONObject data = loadDays(context);
 
         Bitmap bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888);
         Canvas c = new Canvas(bmp);
 
         float pad = w * 0.045f;
         float corner = Math.min(w, h) * 0.055f;
-
         Paint bg = new Paint(Paint.ANTI_ALIAS_FLAG);
         bg.setColor(BG);
         c.drawRoundRect(new RectF(0, 0, w, h), corner, corner, bg);
 
-        Calendar cal = Calendar.getInstance();
-        int year = cal.get(Calendar.YEAR);
-        int month = cal.get(Calendar.MONTH);
-        int today = cal.get(Calendar.DAY_OF_MONTH);
+        Calendar now = Calendar.getInstance();
+        int todayDay = now.get(Calendar.DAY_OF_MONTH);
+        int todayMonth = now.get(Calendar.MONTH);
+        int todayYear = now.get(Calendar.YEAR);
 
-        Calendar first = Calendar.getInstance();
-        first.set(year, month, 1);
-        int firstDow = first.get(Calendar.DAY_OF_WEEK) - Calendar.SUNDAY; // 0..6
-        int daysInMonth = first.getActualMaximum(Calendar.DAY_OF_MONTH);
-        int rows = (int) Math.ceil((firstDow + daysInMonth) / 7.0);
+        Calendar shown = Calendar.getInstance();
+        shown.add(Calendar.MONTH, monthOffset);
+        int year = shown.get(Calendar.YEAR);
+        int month = shown.get(Calendar.MONTH);
+        boolean isCurrentMonth = (month == todayMonth && year == todayYear);
+
+        List<Week> weeks = buildWeeks(data, year, month);
+        int rows = Math.max(1, weeks.size());
 
         // ---- layout metrics ----
         float titleH = h * 0.135f;
@@ -122,12 +221,13 @@ public class CalendarWidgetProvider extends AppWidgetProvider {
         float gridBottom = h - pad;
         float gridLeft = pad;
         float gridRight = w - pad;
-        float colW = (gridRight - gridLeft) / 7f;
+        int cols = 6; // Mon–Fri + Week
+        float colW = (gridRight - gridLeft) / cols;
         float rowH = (gridBottom - gridTop) / rows;
         float gap = Math.min(colW, rowH) * 0.06f;
         float cellR = Math.min(colW, rowH) * 0.16f;
 
-        // ---- title + monthly total ----
+        // ---- title + monthly total (arrows are overlaid on the right) ----
         String[] monthNames = {"January","February","March","April","May","June",
                 "July","August","September","October","November","December"};
         float titleSize = titleH * 0.52f;
@@ -137,74 +237,103 @@ public class CalendarWidgetProvider extends AppWidgetProvider {
 
         long monthTotal = 0;
         boolean hasData = false;
-        for (int d = 1; d <= daysInMonth; d++) {
-            Long v = dayValue(days, year, month, d);
-            if (v != null) { monthTotal += v; hasData = true; }
+        for (Week week : weeks) {
+            if (week.hasData) { hasData = true; monthTotal += week.total; }
         }
         if (hasData) {
             Paint totalPaint = textPaint(monthTotal >= 0 ? GREEN : RED_SOFT, titleSize * 0.9f, true);
             String totalStr = (monthTotal >= 0 ? "+" : "") + compact(monthTotal);
-            c.drawText(totalStr, gridRight - totalPaint.measureText(totalStr), titleBaseline, totalPaint);
+            // Reserve the top-right corner for the month arrows.
+            float arrowsZone = Math.max(w * 0.2f, 150f);
+            c.drawText(totalStr, gridRight - arrowsZone - totalPaint.measureText(totalStr), titleBaseline, totalPaint);
         }
 
-        // ---- weekday header ----
-        String[] dow = {"Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"};
+        // ---- column header ----
+        String[] heads = {"Mon", "Tue", "Wed", "Thu", "Fri", "Week"};
         Paint dowPaint = textPaint(TEXT_DIM, dowH * 0.42f, false);
-        for (int i = 0; i < 7; i++) {
-            float cx = gridLeft + colW * i + colW / 2 - dowPaint.measureText(dow[i]) / 2;
-            c.drawText(dow[i], cx, gridTop - dowH * 0.3f, dowPaint);
+        for (int i = 0; i < cols; i++) {
+            float cx = gridLeft + colW * i + colW / 2 - dowPaint.measureText(heads[i]) / 2;
+            c.drawText(heads[i], cx, gridTop - dowH * 0.3f, dowPaint);
         }
 
-        // ---- day cells ----
+        // ---- cells ----
         float dayNumSize = Math.min(colW, rowH) * 0.30f;
         float pnlSize = Math.min(colW, rowH) * 0.24f;
-
         Paint cellPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        Paint weekBorder = new Paint(Paint.ANTI_ALIAS_FLAG);
+        weekBorder.setStyle(Paint.Style.STROKE);
+        weekBorder.setStrokeWidth(Math.max(1.5f, Math.min(colW, rowH) * 0.02f));
+        weekBorder.setColor(WEEK_BORDER);
         Paint dayNum = textPaint(TEXT, dayNumSize, true);
         Paint dayNumDim = textPaint(TEXT_DIM, dayNumSize, false);
         Paint pnlGreen = textPaint(GREEN_SOFT, pnlSize, true);
         Paint pnlRed = textPaint(RED_SOFT, pnlSize, true);
+        Paint weekLabel = textPaint(TEXT_DIM, pnlSize * 0.85f, false);
         Paint todayRing = new Paint(Paint.ANTI_ALIAS_FLAG);
         todayRing.setStyle(Paint.Style.STROKE);
         todayRing.setStrokeWidth(Math.max(2.5f, Math.min(colW, rowH) * 0.045f));
         todayRing.setColor(GREEN);
 
-        for (int d = 1; d <= daysInMonth; d++) {
-            int slot = firstDow + d - 1;
-            int row = slot / 7, col = slot % 7;
-            float l = gridLeft + col * colW + gap;
-            float t = gridTop + row * rowH + gap;
-            float r = gridLeft + (col + 1) * colW - gap;
-            float b = gridTop + (row + 1) * rowH - gap;
-            RectF rect = new RectF(l, t, r, b);
+        for (int r = 0; r < weeks.size(); r++) {
+            Week week = weeks.get(r);
+            for (int i = 0; i < 5; i++) {
+                if (week.days[i] == 0) continue; // day outside this month
+                RectF rect = cellRect(gridLeft, gridTop, colW, rowH, i, r, gap);
+                Long v = week.values[i];
+                cellPaint.setColor(v == null ? CELL : (v >= 0 ? CELL_PROFIT : CELL_LOSS));
+                c.drawRoundRect(rect, cellR, cellR, cellPaint);
 
-            Long v = dayValue(days, year, month, d);
-            if (v == null) cellPaint.setColor(CELL);
-            else if (v >= 0) cellPaint.setColor(CELL_PROFIT);
-            else cellPaint.setColor(CELL_LOSS);
-            c.drawRoundRect(rect, cellR, cellR, cellPaint);
+                boolean isToday = isCurrentMonth && week.days[i] == todayDay;
+                if (isToday) {
+                    float half = todayRing.getStrokeWidth() / 2;
+                    c.drawRoundRect(new RectF(rect.left + half, rect.top + half,
+                            rect.right - half, rect.bottom - half), cellR - half, cellR - half, todayRing);
+                }
 
-            float half = todayRing.getStrokeWidth() / 2;
-            if (d == today) {
-                RectF ringRect = new RectF(rect.left + half, rect.top + half, rect.right - half, rect.bottom - half);
-                c.drawRoundRect(ringRect, cellR - half, cellR - half, todayRing);
+                String ds = String.valueOf(week.days[i]);
+                if (v == null) {
+                    Paint np = isToday ? dayNum : dayNumDim;
+                    float baseline = rect.centerY() - (np.ascent() + np.descent()) / 2;
+                    c.drawText(ds, rect.centerX() - np.measureText(ds) / 2, baseline, np);
+                } else {
+                    c.drawText(ds, rect.centerX() - dayNum.measureText(ds) / 2,
+                            rect.centerY() - rect.height() * 0.10f, dayNum);
+                    String ps = (v >= 0 ? "+" : "") + compact(v);
+                    Paint pp = v >= 0 ? pnlGreen : pnlRed;
+                    c.drawText(ps, rect.centerX() - pp.measureText(ps) / 2,
+                            rect.centerY() + rect.height() * 0.28f, pp);
+                }
             }
 
-            String ds = String.valueOf(d);
-            if (v == null) {
-                Paint np = d == today ? dayNum : dayNumDim;
-                float baseline = rect.centerY() - (np.ascent() + np.descent()) / 2;
-                c.drawText(ds, rect.centerX() - np.measureText(ds) / 2, baseline, np);
+            // weekly total column
+            RectF wr = cellRect(gridLeft, gridTop, colW, rowH, 5, r, gap);
+            cellPaint.setColor(WEEK_CELL);
+            c.drawRoundRect(wr, cellR, cellR, cellPaint);
+            c.drawRoundRect(wr, cellR, cellR, weekBorder);
+            if (week.hasData) {
+                String lbl = "Total";
+                c.drawText(lbl, wr.centerX() - weekLabel.measureText(lbl) / 2,
+                        wr.centerY() - wr.height() * 0.12f, weekLabel);
+                String ws = (week.total >= 0 ? "+" : "") + compact(week.total);
+                Paint wp = week.total >= 0 ? pnlGreen : pnlRed;
+                c.drawText(ws, wr.centerX() - wp.measureText(ws) / 2,
+                        wr.centerY() + wr.height() * 0.26f, wp);
             } else {
-                float numBaseline = rect.centerY() - rect.height() * 0.10f;
-                c.drawText(ds, rect.centerX() - dayNum.measureText(ds) / 2, numBaseline, dayNum);
-                String ps = (v >= 0 ? "+" : "") + compact(v);
-                Paint pp = v >= 0 ? pnlGreen : pnlRed;
-                float pnlBaseline = rect.centerY() + rect.height() * 0.28f;
-                c.drawText(ps, rect.centerX() - pp.measureText(ps) / 2, pnlBaseline, pp);
+                String dash = "–";
+                float baseline = wr.centerY() - (dayNumDim.ascent() + dayNumDim.descent()) / 2;
+                c.drawText(dash, wr.centerX() - dayNumDim.measureText(dash) / 2, baseline, dayNumDim);
             }
         }
         return bmp;
+    }
+
+    private static RectF cellRect(float gridLeft, float gridTop, float colW, float rowH,
+                                  int col, int row, float gap) {
+        return new RectF(
+                gridLeft + col * colW + gap,
+                gridTop + row * rowH + gap,
+                gridLeft + (col + 1) * colW - gap,
+                gridTop + (row + 1) * rowH - gap);
     }
 
     private static String compact(long v) {
