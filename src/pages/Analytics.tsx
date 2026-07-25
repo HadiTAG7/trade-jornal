@@ -23,6 +23,7 @@ import {
   Legend,
 } from 'recharts';
 import { format, getDay, getHours, parseISO } from 'date-fns';
+import { byId, toTrades } from '@/lib/tradeMapping';
 
 const COLORS = ['hsl(var(--chart-1))', 'hsl(var(--chart-2))', 'hsl(var(--chart-3))', 'hsl(var(--chart-4))', 'hsl(var(--chart-5))'];
 const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
@@ -43,18 +44,7 @@ export default function Analytics() {
         fetchAll<Trade>(user.id, 'trades', 'entry_datetime', 'asc'),
         fetchAll<Strategy>(user.id, 'strategies'),
       ]);
-      const strategiesById = Object.fromEntries(allStrategies.map(s => [s.id, s]));
-
-      const typedTrades = data.map(t => ({
-        ...t,
-        entry_price: Number(t.entry_price),
-        exit_price: t.exit_price ? Number(t.exit_price) : null,
-        quantity: Number(t.quantity),
-        fees: Number(t.fees) || 0,
-        commissions: Number(t.commissions) || 0,
-        stop_loss: t.stop_loss ? Number(t.stop_loss) : null,
-        strategy: t.strategy_id ? strategiesById[t.strategy_id] : undefined,
-      })) as Trade[];
+      const typedTrades = toTrades(data, { strategiesById: byId(allStrategies) });
 
       setTrades(typedTrades);
     } catch (error) {

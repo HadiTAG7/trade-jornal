@@ -195,7 +195,7 @@ export function InstrumentSection({ trades }: InstrumentSectionProps) {
     closedTrades.forEach(trade => {
       const metrics = calculateTradeMetrics(trade);
       const existing = grouped.get(trade.symbol) || 0;
-      grouped.set(trade.symbol, existing + metrics.grossPnL);
+      grouped.set(trade.symbol, existing + metrics.netPnL);
     });
 
     const sorted = Array.from(grouped.entries())

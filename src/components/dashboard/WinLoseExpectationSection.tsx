@@ -36,12 +36,12 @@ export function WinLoseExpectationSection({ trades }: WinLoseExpectationSectionP
 
     closedTrades.forEach(trade => {
       const metrics = calculateTradeMetrics(trade);
-      if (metrics.grossPnL > 0) {
+      if (metrics.netPnL > 0) {
         wins++;
-        totalGain += metrics.grossPnL;
-      } else if (metrics.grossPnL < 0) {
+        totalGain += metrics.netPnL;
+      } else if (metrics.netPnL < 0) {
         losses++;
-        totalLoss += Math.abs(metrics.grossPnL);
+        totalLoss += Math.abs(metrics.netPnL);
       }
     });
 
@@ -93,11 +93,11 @@ export function WinLoseExpectationSection({ trades }: WinLoseExpectationSectionP
     let cumulative = 0;
     return closedTrades.map(trade => {
       const metrics = calculateTradeMetrics(trade);
-      cumulative += metrics.grossPnL;
+      cumulative += metrics.netPnL;
       return {
         date: closedAt(trade)!,
         cumulative,
-        pnl: metrics.grossPnL,
+        pnl: metrics.netPnL,
       };
     });
   })();
@@ -111,7 +111,7 @@ export function WinLoseExpectationSection({ trades }: WinLoseExpectationSectionP
     
     return closedTrades.map(trade => {
       const metrics = calculateTradeMetrics(trade);
-      equity += metrics.grossPnL;
+      equity += metrics.netPnL;
       peak = Math.max(peak, equity);
       const drawdown = equity - peak; // Will be 0 or negative
       
