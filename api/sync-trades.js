@@ -150,7 +150,11 @@ async function ensureStrategies(projectId, uid, token, names) {
   return map;
 }
 
-function buildTradeDoc(row, uid, nowIso, strategyId) {
+// Fields the sync owns and refreshes on every run. Everything the user can
+// edit (notes, fills, MAE/MFE, account, review text, tags…) is deliberately
+// absent here, and the write is masked to these keys so a sync can never
+// clobber hand-entered data.
+export function brokerFields(row, uid, nowIso) {
   const entryIso = toEtIso(row.opened_at) || toEtIso(row.closed_at);
   const exitIso = toEtIso(row.closed_at);
   const qty = num(row.qty) ?? 0;
@@ -159,7 +163,7 @@ function buildTradeDoc(row, uid, nowIso, strategyId) {
   const stop = num(row.stop);
   const pnl = num(row.pnl);
   const r = num(row.r_multiple);
-  const f = {
+  return {
     user_id: { stringValue: uid },
     symbol: { stringValue: String(row.symbol || '').toUpperCase() },
     side: { stringValue: row.side === 'SHORT' ? 'SHORT' : 'LONG' },
@@ -168,28 +172,68 @@ function buildTradeDoc(row, uid, nowIso, strategyId) {
     entry_price: { doubleValue: entry },
     exit_price: exit === null ? { nullValue: null } : { doubleValue: exit },
     quantity: { integerValue: String(Math.round(qty)) },
-    fees: { doubleValue: 0 },
-    commissions: { doubleValue: 0 },
     stop_loss: stop === null ? { nullValue: null } : { doubleValue: stop },
     net_pnl: pnl === null ? { nullValue: null } : { doubleValue: pnl },
-    planned_r_override: r === null ? { nullValue: null } : { doubleValue: r },
-    notes: { stringValue: `Imported from broker${row.source ? ` (${row.source})` : ''}` },
-    strategy_id: strategyId ? { stringValue: strategyId } : { nullValue: null },
+    // Broker-reported R lives in its own field; planned_r_override stays the
+    // user's to set.
+    broker_r_multiple: r === null ? { nullValue: null } : { doubleValue: r },
+    broker_order_id: { stringValue: row.order_id ? String(row.order_id) : '' },
+    broker_source: { stringValue: String(row.source || '') },
+    // True when the broker log had no open time, so hold time is not real.
+    entry_time_estimated: { booleanValue: !row.opened_at },
     source: { stringValue: 'Schwab' },
-    created_at: { stringValue: nowIso },
+    sync_fingerprint: { stringValue: fingerprint(row) },
     updated_at: { stringValue: nowIso },
   };
-  return { fields: f };
 }
 
-async function writeTrade(projectId, uid, token, docId, doc) {
-  const url = `${FIRESTORE}/projects/${projectId}/databases/(default)/documents/users/${uid}/trades/${docId}`;
+// Written only when the document is first created, so later user edits stick.
+export function firstWriteFields(row, nowIso) {
+  return {
+    notes: { stringValue: `Imported from broker${row.source ? ` (${row.source})` : ''}` },
+    fees: { doubleValue: 0 },
+    commissions: { doubleValue: 0 },
+    created_at: { stringValue: nowIso },
+  };
+}
+
+// Stable hash of the broker-side values: identical fingerprint => nothing to
+// write, which keeps a steady state at zero writes.
+export function fingerprint(row) {
+  const parts = [
+    row.symbol, row.side, row.qty, row.entry, row.exit,
+    row.stop, row.pnl, row.r_multiple, row.opened_at, row.closed_at, row.source,
+  ].map((v) => (v === null || v === undefined ? '' : String(v)));
+  return crypto.createHash('sha1').update(parts.join('|')).digest('hex').slice(0, 16);
+}
+
+// Fields derived from prices/quantity that the user's own fills own instead.
+const FILL_DERIVED_FIELDS = [
+  'quantity', 'entry_price', 'exit_price', 'entry_datetime', 'exit_datetime', 'net_pnl',
+];
+
+/**
+ * Masked write. The mask is generated from the body's own keys — a path in the
+ * mask with no value in the body would DELETE that field, so the two must
+ * never be maintained separately.
+ */
+async function writeTradeFields(projectId, uid, token, docId, fields, { create }) {
+  const params = Object.keys(fields)
+    .map((k) => `updateMask.fieldPaths=${encodeURIComponent(k)}`)
+    .join('&');
+  const guard = create ? '&currentDocument.exists=false' : '&currentDocument.exists=true';
+  const url = `${FIRESTORE}/projects/${projectId}/databases/(default)/documents/users/${uid}/trades/${docId}?${params}${guard}`;
   const r = await fetch(url, {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-    body: JSON.stringify(doc),
+    body: JSON.stringify({ fields }),
   });
-  if (!r.ok) throw new Error(`write ${docId} failed: ${r.status} ${await r.text()}`);
+  if (!r.ok) {
+    const body = await r.text();
+    const err = new Error(`write ${docId} failed: ${r.status} ${body}`);
+    err.status = r.status;
+    throw err;
+  }
 }
 
 // ET wall-clock ISO -> epoch seconds (uses the actual ET offset at that date).
@@ -219,15 +263,17 @@ function exitToEpoch(iso) {
 // Delete non-Schwab copies of trades the broker log covers (e.g. earlier
 // ThinkOrSwim/TraderVue imports of the same executions). A duplicate is the
 // same symbol + same quantity closing within 5 minutes of a broker trade.
-async function pruneCrossSourceDuplicates(projectId, uid, token, brokerRows) {
+async function pruneCrossSourceDuplicates(projectId, uid, token, brokerRows, destructive) {
   const broker = brokerRows
     .filter((r) => r.symbol && r.closed_at)
     .map((r) => ({
       sym: String(r.symbol).toUpperCase(),
       qty: Math.round(Number(r.qty) || 0),
       t: Number(r.closed_at),
+      exit: num(r.exit),
+      orderId: r.order_id ? String(r.order_id) : '',
     }));
-  if (!broker.length) return 0;
+  if (!broker.length) return { deleted: 0, candidates: 0 };
   const minT = Math.min(...broker.map((b) => b.t)) - 86400;
 
   const url = `${FIRESTORE}/projects/${projectId}/databases/(default)/documents/users/${uid}:runQuery`;
@@ -254,23 +300,42 @@ async function pruneCrossSourceDuplicates(projectId, uid, token, brokerRows) {
   const rows = await r.json();
 
   let deleted = 0;
+  let candidates = 0;
   for (const row of rows) {
     if (!row.document) continue;
     const f = row.document.fields || {};
     const src = f.source && f.source.stringValue;
     if (src === 'Schwab') continue; // keep the broker copy
+    if (f.archived && f.archived.booleanValue) continue; // already handled
     const sym = ((f.symbol && f.symbol.stringValue) || '').toUpperCase();
     const qty = Math.round(Number((f.quantity && (f.quantity.integerValue ?? f.quantity.doubleValue)) || 0));
+    const exitPrice = f.exit_price && f.exit_price.doubleValue;
     const exitIso = f.exit_datetime && f.exit_datetime.stringValue;
     const t = exitToEpoch(exitIso);
     if (!sym || !t) continue;
-    const isDup = broker.some((b) => b.sym === sym && b.qty === qty && Math.abs(b.t - t) <= 300);
-    if (isDup) {
-      await deleteTrade(projectId, uid, token, row.document.name.split('/').pop());
+    const match = broker.find((b) => {
+      if (b.sym !== sym || b.qty !== qty || Math.abs(b.t - t) > 300) return false;
+      // Price sanity check: same execution should price within 0.5%.
+      if (b.exit != null && exitPrice != null && b.exit !== 0) {
+        return Math.abs(exitPrice - b.exit) / Math.abs(b.exit) < 0.005;
+      }
+      return true;
+    });
+    if (!match) continue;
+    candidates++;
+    const docId = row.document.name.split('/').pop();
+    if (destructive) {
+      await deleteTrade(projectId, uid, token, docId);
       deleted++;
+    } else {
+      // Non-destructive: mark it so the UI can hide it and the owner can review.
+      await writeTradeFields(projectId, uid, token, docId, {
+        archived: { booleanValue: true },
+        duplicate_of: { stringValue: `schwab_${match.orderId || ''}` },
+      }, { create: false }).catch(() => {});
     }
   }
-  return deleted;
+  return { deleted, candidates };
 }
 
 // Existing Schwab-sourced trade doc ids (via a source == 'Schwab' query).
@@ -286,7 +351,14 @@ async function listSchwabDocs(projectId, uid, token) {
           value: { stringValue: 'Schwab' },
         },
       },
-      select: { fields: [{ fieldPath: 'source' }, { fieldPath: 'strategy_id' }] },
+      select: {
+        fields: [
+          { fieldPath: 'source' },
+          { fieldPath: 'strategy_id' },
+          { fieldPath: 'sync_fingerprint' },
+          { fieldPath: 'executions' },
+        ],
+      },
     },
   };
   const r = await fetch(url, {
@@ -300,9 +372,12 @@ async function listSchwabDocs(projectId, uid, token) {
   for (const row of rows) {
     if (!row.document || !row.document.name) continue;
     const f = row.document.fields || {};
+    const fills = f.executions && f.executions.arrayValue && f.executions.arrayValue.values;
     docs.push({
       id: row.document.name.split('/').pop(),
       strategy_id: (f.strategy_id && f.strategy_id.stringValue) || null,
+      sync_fingerprint: (f.sync_fingerprint && f.sync_fingerprint.stringValue) || null,
+      hasFills: Array.isArray(fills) && fills.length > 0,
     });
   }
   return docs;
@@ -340,6 +415,7 @@ export default async function handler(req, res) {
 
   if (!(await isAuthorized(req))) return res.status(401).json({ error: 'unauthorized' });
 
+  const warnings = [];
   try {
     const base = process.env.RAILWAY_URL;
     const projectId = process.env.VITE_FIREBASE_PROJECT_ID;
@@ -369,53 +445,127 @@ export default async function handler(req, res) {
     if (wanted.size) {
       try {
         strategyIds = await ensureStrategies(projectId, uid, token, [...wanted]);
-      } catch { /* strategy tagging is best-effort */ }
+      } catch (err) {
+        warnings.push(`strategy tagging skipped: ${err.message}`);
+      }
     }
 
-    // Existing synced docs (also tells us which already carry a strategy).
-    let existingDocs = [];
-    try {
-      existingDocs = await listSchwabDocs(projectId, uid, token);
-    } catch { /* best-effort */ }
+    // Existing synced docs: tells us what to create vs update, which docs
+    // already carry a strategy or user fills, and what changed since last run.
+    // A failure here is fatal — silently treating it as "no existing docs"
+    // would recreate documents and drop manual strategy assignments.
+    const existingDocs = await listSchwabDocs(projectId, uid, token);
     const existingById = new Map(existingDocs.map((d) => [d.id, d]));
 
     const nowIso = new Date().toISOString();
     const newIds = new Set();
     const strategyCounts = {};
+    let created = 0;
     let written = 0;
+    let unchanged = 0;
+    let fillDerivedSkipped = 0;
+
     for (const [key, row] of byKey) {
       const docId = `schwab_${key}`;
       newIds.add(docId);
       const mappedName = strategyForSource(row.source);
       const mappedId = mappedName ? strategyIds.get(mappedName.toLowerCase()) || null : null;
-      // Keep a manually assigned strategy if there is one.
       const prior = existingById.get(docId);
-      const strategyId = (prior && prior.strategy_id) || mappedId;
-      const label = mappedName || 'unassigned';
-      strategyCounts[label] = (strategyCounts[label] || 0) + 1;
-      await writeTrade(projectId, uid, token, docId, buildTradeDoc(row, uid, nowIso, strategyId));
+      strategyCounts[mappedName || 'unassigned'] =
+        (strategyCounts[mappedName || 'unassigned'] || 0) + 1;
+
+      const fields = brokerFields(row, uid, nowIso);
+
+      if (!prior) {
+        // First write: broker fields + the create-only defaults.
+        Object.assign(fields, firstWriteFields(row, nowIso));
+        if (mappedId) fields.strategy_id = { stringValue: mappedId };
+        await writeTradeFields(projectId, uid, token, docId, fields, { create: true })
+          .catch(async (err) => {
+            // Lost a race (doc appeared meanwhile) — fall back to an update.
+            if (err.status !== 409 && err.status !== 400) throw err;
+            await writeTradeFields(projectId, uid, token, docId, fields, { create: false });
+          });
+        created++;
+        written++;
+        continue;
+      }
+
+      // Nothing changed upstream: skip the write entirely.
+      if (prior.sync_fingerprint && prior.sync_fingerprint === fields.sync_fingerprint.stringValue) {
+        unchanged++;
+        continue;
+      }
+
+      // The user's own fills own the derived numbers — never overwrite them.
+      if (prior.hasFills) {
+        for (const f of FILL_DERIVED_FIELDS) delete fields[f];
+        fillDerivedSkipped++;
+      }
+      // Only fill in a strategy that isn't set yet.
+      if (!prior.strategy_id && mappedId) fields.strategy_id = { stringValue: mappedId };
+
+      await writeTradeFields(projectId, uid, token, docId, fields, { create: false });
       written++;
     }
 
-    // Prune stale Schwab trades (old import scheme / removed at source).
+    // Prune stale synced trades, with a guard: an upstream hiccup (empty or
+    // truncated broker log) must never wipe real trades.
     let pruned = 0;
-    for (const d of existingDocs) {
-      if (!newIds.has(d.id)) {
+    let pruneSkipped;
+    const staleIds = existingDocs.filter((d) => !newIds.has(d.id)).map((d) => d.id);
+    const pruneCap = Math.max(3, Math.ceil(existingDocs.length * 0.1));
+    if (byKey.size === 0) {
+      pruneSkipped = 'empty-source';
+    } else if (staleIds.length > pruneCap) {
+      pruneSkipped = `threshold (${staleIds.length} > ${pruneCap})`;
+      warnings.push(`prune skipped: ${staleIds.length} stale docs exceeds cap ${pruneCap}`);
+    } else {
+      for (const id of staleIds) {
         try {
-          await deleteTrade(projectId, uid, token, d.id);
+          await deleteTrade(projectId, uid, token, id);
           pruned++;
-        } catch { /* best-effort */ }
+        } catch (err) {
+          warnings.push(`delete ${id} failed: ${err.message}`);
+        }
       }
     }
 
     // Remove older-source copies of the same executions (cross-source dupes).
+    // Deletion is opt-in: without the flag we only report what would go, so a
+    // false match can never destroy a hand-written trade.
     let dedupedCrossSource = 0;
+    let dedupeCandidates = 0;
     try {
-      dedupedCrossSource = await pruneCrossSourceDuplicates(projectId, uid, token, [...byKey.values()]);
-    } catch { /* best-effort */ }
+      const destructive = process.env.SYNC_PRUNE_DUPES === '1';
+      const res = await pruneCrossSourceDuplicates(
+        projectId, uid, token, [...byKey.values()], destructive,
+      );
+      dedupedCrossSource = res.deleted;
+      dedupeCandidates = res.candidates;
+      if (!destructive && res.candidates > 0) {
+        warnings.push(`${res.candidates} cross-source duplicate(s) detected; set SYNC_PRUNE_DUPES=1 to delete`);
+      }
+    } catch (err) {
+      warnings.push(`cross-source dedupe skipped: ${err.message}`);
+    }
 
-    return res.status(200).json({ ok: true, rows: rows.length, written, pruned, dedupedCrossSource, strategies: strategyCounts, uid });
+    return res.status(200).json({
+      ok: true,
+      rows: rows.length,
+      created,
+      written,
+      unchanged,
+      fillDerivedSkipped,
+      pruned,
+      pruneSkipped,
+      dedupedCrossSource,
+      dedupeCandidates,
+      strategies: strategyCounts,
+      warnings,
+      uid,
+    });
   } catch (err) {
-    return res.status(500).json({ ok: false, error: String((err && err.message) || err) });
+    return res.status(500).json({ ok: false, error: String((err && err.message) || err), warnings });
   }
 }
