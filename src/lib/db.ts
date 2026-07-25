@@ -120,12 +120,20 @@ export async function bulkInsert(
 
 // ---- trades ----
 
-// Imported trades use stable_hash as the document ID, so re-importing the
-// same file can never create duplicates (mirrors the old unique constraint
-// on (user_id, stable_hash)).
+/**
+ * Imported trades use stable_hash as the document id, so re-importing the same
+ * file can never create duplicate documents.
+ *
+ * `{ merge: true }` matters: a plain `set` replaces the document, so re-importing
+ * a file that had already produced a trade wiped everything the owner added to it
+ * afterwards — notes, fills, MAE/MFE, tags — and reset `created_at` to now.
+ * Merging leaves fields the CSV doesn't carry alone, and `created_at` is written
+ * only for ids that aren't stored yet.
+ */
 export async function importTradesByHash(
   uid: string,
   rows: Array<Record<string, unknown> & { stable_hash: string }>,
+  existingIds: Set<string> = new Set(),
 ): Promise<number> {
   const unique = new Map<string, Record<string, unknown>>();
   for (const row of rows) unique.set(row.stable_hash, row);
@@ -134,12 +142,16 @@ export async function importTradesByHash(
   for (let i = 0; i < entries.length; i += BATCH_LIMIT) {
     const batch = writeBatch(db);
     for (const [hash, row] of entries.slice(i, i + BATCH_LIMIT)) {
-      batch.set(doc(db, 'users', uid, 'trades', hash), {
-        ...row,
-        user_id: uid,
-        created_at: nowIso(),
-        updated_at: nowIso(),
-      });
+      batch.set(
+        doc(db, 'users', uid, 'trades', hash),
+        {
+          ...row,
+          user_id: uid,
+          ...(existingIds.has(hash) ? {} : { created_at: nowIso() }),
+          updated_at: nowIso(),
+        },
+        { merge: true },
+      );
     }
     await batch.commit();
   }
