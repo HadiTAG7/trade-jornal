@@ -32,6 +32,24 @@
     padding-right: env(safe-area-inset-right, 0px);
     padding-bottom: env(safe-area-inset-bottom, 0px);
   }
+
+  /* Horizontal scroll without a visible bar, for the header nav on mid widths. */
+  .no-scrollbar {
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+  }
+  .no-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
+
+  /* A fixed element positions against the viewport, so it does not inherit
+     .app-safe-body's inset and needs its own — otherwise the bottom nav sits
+     under the gesture bar. */
+  .app-safe-bottom {
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+    padding-left: env(safe-area-inset-left, 0px);
+    padding-right: env(safe-area-inset-right, 0px);
+  }
 }
 
 @layer base {
