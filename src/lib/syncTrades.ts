@@ -2,8 +2,14 @@ import { auth } from '@/integrations/firebase/client';
 
 export interface SyncResult {
   ok: boolean;
+  trigger?: 'cron' | 'manual';
   rows?: number;
+  trades?: number;
+  created?: number;
   written?: number;
+  unchanged?: number;
+  pruned?: number;
+  warnings?: string[];
   error?: string;
 }
 

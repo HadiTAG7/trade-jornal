@@ -263,7 +263,7 @@ function exitToEpoch(iso) {
 // Delete non-Schwab copies of trades the broker log covers (e.g. earlier
 // ThinkOrSwim/TraderVue imports of the same executions). A duplicate is the
 // same symbol + same quantity closing within 5 minutes of a broker trade.
-async function pruneCrossSourceDuplicates(projectId, uid, token, brokerRows, destructive) {
+async function pruneCrossSourceDuplicates(projectId, uid, token, brokerRows, destructive, warnings) {
   const broker = brokerRows
     .filter((r) => r.symbol && r.closed_at)
     .map((r) => ({
@@ -329,10 +329,14 @@ async function pruneCrossSourceDuplicates(projectId, uid, token, brokerRows, des
       deleted++;
     } else {
       // Non-destructive: mark it so the UI can hide it and the owner can review.
-      await writeTradeFields(projectId, uid, token, docId, {
-        archived: { booleanValue: true },
-        duplicate_of: { stringValue: `schwab_${match.orderId || ''}` },
-      }, { create: false }).catch(() => {});
+      try {
+        await writeTradeFields(projectId, uid, token, docId, {
+          archived: { booleanValue: true },
+          duplicate_of: { stringValue: `schwab_${match.orderId || ''}` },
+        }, { create: false });
+      } catch (err) {
+        warnings.push(`could not flag duplicate ${docId}: ${err.message}`);
+      }
     }
   }
   return { deleted, candidates };
@@ -388,22 +392,105 @@ async function deleteTrade(projectId, uid, token, docId) {
   await fetch(url, { method: 'DELETE', headers: { Authorization: `Bearer ${token}` } });
 }
 
-async function isAuthorized(req) {
+// --- run log -----------------------------------------------------------------
+// Until now a failed sync was invisible: the cron's non-200 went to Vercel's
+// logs and nowhere the owner would ever look, so the app could sit on stale
+// data for days while still looking healthy. Every run — success or failure —
+// now leaves a record the Settings page reads.
+
+export function toFirestoreValue(v) {
+  if (v === null || v === undefined) return { nullValue: null };
+  if (typeof v === 'boolean') return { booleanValue: v };
+  if (typeof v === 'number') return Number.isInteger(v) ? { integerValue: String(v) } : { doubleValue: v };
+  if (Array.isArray(v)) return { arrayValue: { values: v.map(toFirestoreValue) } };
+  if (typeof v === 'object') return { mapValue: { fields: toFirestoreFields(v) } };
+  return { stringValue: String(v) };
+}
+
+export function toFirestoreFields(obj) {
+  return Object.fromEntries(Object.entries(obj).map(([k, v]) => [k, toFirestoreValue(v)]));
+}
+
+export function fromFirestoreValue(v) {
+  if (!v || typeof v !== 'object') return v;
+  if ('nullValue' in v) return null;
+  if ('booleanValue' in v) return v.booleanValue;
+  if ('integerValue' in v) return Number(v.integerValue);
+  if ('doubleValue' in v) return Number(v.doubleValue);
+  if ('stringValue' in v) return v.stringValue;
+  if ('arrayValue' in v) return (v.arrayValue.values || []).map(fromFirestoreValue);
+  if ('mapValue' in v) {
+    return Object.fromEntries(
+      Object.entries(v.mapValue.fields || {}).map(([k, x]) => [k, fromFirestoreValue(x)]),
+    );
+  }
+  return null;
+}
+
+async function putDoc(projectId, uid, token, path, data) {
+  const url = `${FIRESTORE}/projects/${projectId}/databases/(default)/documents/users/${uid}/${path}`;
+  const r = await fetch(url, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+    body: JSON.stringify({ fields: toFirestoreFields(data) }),
+  });
+  if (!r.ok) throw new Error(`write ${path} failed: ${r.status} ${await r.text()}`);
+}
+
+async function getDoc(projectId, uid, token, path) {
+  const url = `${FIRESTORE}/projects/${projectId}/databases/(default)/documents/users/${uid}/${path}`;
+  const r = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+  if (!r.ok) return null;
+  const doc = await r.json();
+  return Object.fromEntries(
+    Object.entries(doc.fields || {}).map(([k, v]) => [k, fromFirestoreValue(v)]),
+  );
+}
+
+/**
+ * Writes `sync_meta/last` (what the UI shows) and appends to
+ * `sync_runs/{yyyy-MM-dd}` (a short per-day history). Never throws: a failure
+ * to record must not turn a successful sync into a failed one.
+ */
+export async function recordSyncRun(projectId, uid, token, summary) {
+  // A failure before the access token is minted (bad service account, missing
+  // project id) cannot be recorded — writing the record needs that same token.
+  if (!projectId || !uid || !token) return;
+  try {
+    await putDoc(projectId, uid, token, 'sync_meta/last', summary);
+    const day = summary.finished_at.slice(0, 10);
+    const existing = await getDoc(projectId, uid, token, `sync_runs/${day}`);
+    const runs = Array.isArray(existing && existing.runs) ? existing.runs : [];
+    // Two scheduled runs a day plus the odd manual one; keep the day bounded.
+    runs.push(summary);
+    await putDoc(projectId, uid, token, `sync_runs/${day}`, {
+      day,
+      runs: runs.slice(-10),
+      last_ok: summary.ok,
+    });
+  } catch (err) {
+    console.error('sync run record failed:', err && err.message);
+  }
+}
+
+/** Returns how the run was triggered, or null when the caller isn't allowed. */
+async function authorize(req) {
   const auth = req.headers['authorization'] || '';
   const cronSecret = process.env.CRON_SECRET;
-  if (cronSecret && auth === `Bearer ${cronSecret}`) return true;
+  if (cronSecret && auth === `Bearer ${cronSecret}`) return 'cron';
   const m = auth.match(/^Bearer (.+)$/);
-  if (!m) return false;
+  if (!m) return null;
   try {
     const r = await fetch(
       `https://identitytoolkit.googleapis.com/v1/accounts:lookup?key=${process.env.VITE_FIREBASE_API_KEY}`,
       { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ idToken: m[1] }) },
     );
-    if (!r.ok) return false;
+    if (!r.ok) return null;
     const d = await r.json();
-    return d.users && d.users[0] && d.users[0].localId === process.env.TARGET_UID;
+    const ok = d.users && d.users[0] && d.users[0].localId === process.env.TARGET_UID;
+    return ok ? 'manual' : null;
   } catch {
-    return false;
+    return null;
   }
 }
 
@@ -413,16 +500,21 @@ export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Headers', 'authorization, content-type');
   if (req.method === 'OPTIONS') return res.status(204).end();
 
-  if (!(await isAuthorized(req))) return res.status(401).json({ error: 'unauthorized' });
+  const trigger = await authorize(req);
+  if (!trigger) return res.status(401).json({ error: 'unauthorized' });
 
   const warnings = [];
+  const startedAt = new Date().toISOString();
+  const projectId = process.env.VITE_FIREBASE_PROJECT_ID;
+  const uid = process.env.TARGET_UID;
+  // Held outside the try so a failure part-way through can still be recorded.
+  let token = null;
+
   try {
     const base = process.env.RAILWAY_URL;
-    const projectId = process.env.VITE_FIREBASE_PROJECT_ID;
-    const uid = process.env.TARGET_UID;
     const sa = JSON.parse(Buffer.from(process.env.FIREBASE_SERVICE_ACCOUNT_B64, 'base64').toString('utf8'));
 
-    const token = await getAccessToken(sa);
+    token = await getAccessToken(sa);
     const cookie = await railwayLogin(base, process.env.RAILWAY_PASSWORD);
     const rows = await fetchTradeLog(base, cookie);
 
@@ -539,7 +631,7 @@ export default async function handler(req, res) {
     try {
       const destructive = process.env.SYNC_PRUNE_DUPES === '1';
       const res = await pruneCrossSourceDuplicates(
-        projectId, uid, token, [...byKey.values()], destructive,
+        projectId, uid, token, [...byKey.values()], destructive, warnings,
       );
       dedupedCrossSource = res.deleted;
       dedupeCandidates = res.candidates;
@@ -550,22 +642,53 @@ export default async function handler(req, res) {
       warnings.push(`cross-source dedupe skipped: ${err.message}`);
     }
 
-    return res.status(200).json({
+    const finishedAt = new Date().toISOString();
+    const summary = {
       ok: true,
+      trigger,
+      started_at: startedAt,
+      finished_at: finishedAt,
+      duration_ms: Date.parse(finishedAt) - Date.parse(startedAt),
       rows: rows.length,
+      trades: byKey.size,
       created,
       written,
       unchanged,
-      fillDerivedSkipped,
+      fill_derived_skipped: fillDerivedSkipped,
       pruned,
-      pruneSkipped,
-      dedupedCrossSource,
-      dedupeCandidates,
+      prune_skipped: pruneSkipped || null,
+      deduped_cross_source: dedupedCrossSource,
+      dedupe_candidates: dedupeCandidates,
       strategies: strategyCounts,
       warnings,
-      uid,
-    });
+      error: null,
+    };
+    await recordSyncRun(projectId, uid, token, summary);
+
+    return res.status(200).json({ ...summary, uid });
   } catch (err) {
-    return res.status(500).json({ ok: false, error: String((err && err.message) || err), warnings });
+    const finishedAt = new Date().toISOString();
+    const message = String((err && err.message) || err);
+    await recordSyncRun(projectId, uid, token, {
+      ok: false,
+      trigger,
+      started_at: startedAt,
+      finished_at: finishedAt,
+      duration_ms: Date.parse(finishedAt) - Date.parse(startedAt),
+      rows: 0,
+      trades: 0,
+      created: 0,
+      written: 0,
+      unchanged: 0,
+      fill_derived_skipped: 0,
+      pruned: 0,
+      prune_skipped: null,
+      deduped_cross_source: 0,
+      dedupe_candidates: 0,
+      strategies: {},
+      warnings,
+      error: message,
+    });
+    return res.status(500).json({ ok: false, trigger, error: message, warnings });
   }
 }

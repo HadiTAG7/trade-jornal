@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Plus, Trash2, Loader2, Save, Download, RefreshCw } from 'lucide-react';
+import { Plus, Trash2, Loader2, Save, Download } from 'lucide-react';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -11,7 +11,7 @@ import { fetchAll as dbFetchAll, insertItem, deleteItem } from '@/lib/db';
 import { useAuth } from '@/contexts/AuthContext';
 import { Account, Strategy, Tag, Mistake } from '@/types/trade';
 import { exportAllData, downloadAsJson } from '@/lib/exportData';
-import { syncTradesNow } from '@/lib/syncTrades';
+import { SyncStatusCard } from '@/components/settings/SyncStatusCard';
 
 export default function Settings() {
   const { user } = useAuth();
@@ -26,7 +26,6 @@ export default function Settings() {
 
   const [exporting, setExporting] = useState(false);
   const [exportProgress, setExportProgress] = useState('');
-  const [syncing, setSyncing] = useState(false);
 
   // New item forms
   const [newAccount, setNewAccount] = useState({ name: '', broker: '' });
@@ -83,27 +82,6 @@ export default function Settings() {
     } finally {
       setExporting(false);
       setExportProgress('');
-    }
-  };
-
-  const handleSyncNow = async () => {
-    setSyncing(true);
-    try {
-      const result = await syncTradesNow();
-      if (result.ok) {
-        toast({
-          title: 'Sync complete',
-          description: `${result.written ?? 0} trades synced from your broker.`,
-        });
-      } else {
-        toast({
-          title: 'Sync failed',
-          description: result.error ?? 'Unknown error',
-          variant: 'destructive',
-        });
-      }
-    } finally {
-      setSyncing(false);
     }
   };
 
@@ -429,26 +407,7 @@ export default function Settings() {
           </TabsContent>
 
           <TabsContent value="data" className="space-y-6">
-            <Card>
-              <CardHeader>
-                <CardTitle>Broker Sync</CardTitle>
-                <CardDescription>
-                  Pull your latest closed trades from your broker now. Trades also sync
-                  automatically every day, so this is only needed if you want the newest
-                  trades right away.
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <Button onClick={handleSyncNow} disabled={syncing}>
-                  {syncing ? (
-                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                  ) : (
-                    <RefreshCw className="h-4 w-4 mr-2" />
-                  )}
-                  {syncing ? 'Syncing…' : 'Sync now'}
-                </Button>
-              </CardContent>
-            </Card>
+            <SyncStatusCard />
 
             <Card>
               <CardHeader>
