@@ -91,7 +91,9 @@ documents instead of duplicating them.
 
 ## Daily broker sync
 
-`api/sync-trades.js` runs daily (Vercel Cron, see `vercel.json`) to pull
+`api/sync-trades.js` runs twice daily (Vercel Cron, see `vercel.json`) at
+15:00 and 20:00 UTC — 6 PM and 11 PM Saudi time, i.e. mid-session and at the
+US market close — to pull
 closed trades from the connected Trading Helper service and write them into
 Firestore. Configure these Vercel environment variables:
 
