@@ -12,6 +12,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { Account, Strategy, Tag, Mistake } from '@/types/trade';
 import { exportAllData, downloadAsJson } from '@/lib/exportData';
 import { SyncStatusCard } from '@/components/settings/SyncStatusCard';
+import { loadList } from '@/lib/safeLoad';
 
 export default function Settings() {
   const { user } = useAuth();
@@ -44,19 +45,19 @@ export default function Settings() {
   };
 
   const fetchAccounts = async () => {
-    setAccounts(await dbFetchAll<Account>(user!.id, 'accounts', 'created_at').catch(() => []));
+    setAccounts(await loadList('accounts', () => dbFetchAll<Account>(user!.id, 'accounts', 'created_at')));
   };
 
   const fetchStrategies = async () => {
-    setStrategies(await dbFetchAll<Strategy>(user!.id, 'strategies', 'created_at').catch(() => []));
+    setStrategies(await loadList('strategies', () => dbFetchAll<Strategy>(user!.id, 'strategies', 'created_at')));
   };
 
   const fetchTags = async () => {
-    setTags(await dbFetchAll<Tag>(user!.id, 'tags', 'created_at').catch(() => []));
+    setTags(await loadList('tags', () => dbFetchAll<Tag>(user!.id, 'tags', 'created_at')));
   };
 
   const fetchMistakes = async () => {
-    setMistakes(await dbFetchAll<Mistake>(user!.id, 'mistakes', 'created_at').catch(() => []));
+    setMistakes(await loadList('mistakes', () => dbFetchAll<Mistake>(user!.id, 'mistakes', 'created_at')));
   };
 
   const handleExportData = async () => {

@@ -6,6 +6,11 @@ android {
     // Stable signing key so every build shares one signature and updates
     // install cleanly. Used only when the keystore file is present locally.
     def tradelogKeystore = file('tradelog-release.keystore')
+    // CI passes these so every published APK is a distinct version. Android
+    // treats an equal versionCode as the same build and won't offer it as an
+    // update, and every APK published so far went out as versionCode 1.
+    def tradelogVersionCode = (project.findProperty('tradelogVersionCode') ?: '1') as Integer
+    def tradelogVersionName = project.findProperty('tradelogVersionName') ?: '1.0'
     signingConfigs {
         tradelog {
             if (tradelogKeystore.exists()) {
@@ -20,8 +25,8 @@ android {
         applicationId "com.tradelog.app"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 1
-        versionName "1.0"
+        versionCode tradelogVersionCode
+        versionName tradelogVersionName
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
