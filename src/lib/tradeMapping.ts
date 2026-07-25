@@ -59,11 +59,16 @@ export function toTrades(raw: Trade[], relations: TradeRelations = {}): Trade[] 
 
 function normalizeExecutions(executions: Trade['executions']): TradeExecution[] | null {
   if (!executions || executions.length === 0) return null;
-  return executions.map((e) => ({
-    ...e,
-    quantity: numOr0(e.quantity),
-    price: numOr0(e.price),
-  }));
+  // Every page runs its trades through here, so one malformed fill must not throw
+  // and take the whole screen down with it — drop the entry instead.
+  const fills = executions
+    .filter((e): e is TradeExecution => !!e && typeof e === 'object')
+    .map((e) => ({
+      ...e,
+      quantity: numOr0(e.quantity),
+      price: numOr0(e.price),
+    }));
+  return fills.length > 0 ? fills : null;
 }
 
 /** Look-up map keyed by id, for attaching relations. */
