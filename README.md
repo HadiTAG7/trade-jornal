@@ -58,6 +58,8 @@ users/{uid}/tags/{id}
 users/{uid}/mistakes/{id}
 users/{uid}/journal_entries/{yyyy-MM-dd}
 users/{uid}/imports/{id}
+users/{uid}/sync_meta/last            most recent broker sync (what Settings shows)
+users/{uid}/sync_runs/{yyyy-MM-dd}    that day's sync runs, newest last
 ```
 
 ## Migrating data from the old Supabase backend
@@ -101,9 +103,21 @@ Firestore. Configure these Vercel environment variables:
 | --- | --- |
 | `RAILWAY_URL` | Base URL of the Trading Helper service |
 | `RAILWAY_PASSWORD` | Login password for that service |
-| `SYNC_FIREBASE_EMAIL` / `SYNC_FIREBASE_PASSWORD` | TradeLog account the sync writes as |
-| `SYNC_DAYS` | Look-back window in days (default 45) |
+| `FIREBASE_SERVICE_ACCOUNT_B64` | Base64 service-account JSON; the sync writes to Firestore with it |
+| `TARGET_UID` | Firebase uid the synced trades belong to |
+| `VITE_FIREBASE_PROJECT_ID` | Firestore project the sync writes to |
+| `VITE_FIREBASE_API_KEY` | Used to verify the ID token behind a manual "Sync now" |
 | `CRON_SECRET` | Shared secret Vercel attaches to cron requests |
+| `SYNC_PRUNE_DUPES` | Set to `1` to delete cross-source duplicates instead of flagging them |
 
-The sync is idempotent — trades are keyed by a stable hash, so re-runs never
-create duplicates.
+The sync is idempotent: trades are keyed by the broker's `order_id`, and a
+fingerprint of the broker-side values means an unchanged trade is not written at
+all — a steady state is zero writes. Writes are field-masked, so notes, fills,
+MAE/MFE, tags and account assignments are never touched.
+
+Every run records itself to `users/{uid}/sync_meta/last` and appends to
+`users/{uid}/sync_runs/{yyyy-MM-dd}`, including failures. Settings → Data shows
+the last result and warns when the last success is more than 36 hours old.
+
+`SYNC_PRUNE_DUPES=1` opts into deleting cross-source duplicates; without it they
+are only flagged (`archived` + `duplicate_of`) for review.
