@@ -4,10 +4,11 @@ import { MainLayout } from '@/components/layout/MainLayout';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { fetchTradesByExitRange } from '@/lib/db';
+import { fetchTradesByCloseRange } from '@/lib/db';
 import { useAuth } from '@/contexts/AuthContext';
 import { Trade, DailyStats } from '@/types/trade';
 import { calculateDailyStats, formatCurrency, formatR } from '@/lib/calculations';
+import { closedDayKey } from '@/lib/tradeStatus';
 import { syncWidgetData } from '@/lib/widgetData';
 import { format, startOfMonth, endOfMonth, eachDayOfInterval, addMonths, subMonths, setYear, getYear, isSameMonth, isToday, startOfYear, endOfYear, eachMonthOfInterval, startOfWeek, endOfWeek } from 'date-fns';
 import { cn } from '@/lib/utils';
@@ -52,7 +53,7 @@ export default function CalendarPage() {
       const yearStart = `${year}-01-01T00:00:00`;
       const yearEnd = `${year}-12-31T23:59:59`;
       
-      const data = await fetchTradesByExitRange<Trade>(user!.id, yearStart, yearEnd);
+      const data = await fetchTradesByCloseRange<Trade>(user!.id, yearStart, yearEnd);
 
       const typedTrades = data.map(t => ({
         ...t,
@@ -140,8 +141,8 @@ export default function CalendarPage() {
   };
 
   const selectedDayStats = selectedDate ? statsMap.get(selectedDate) : null;
-  const selectedDayTrades = selectedDate 
-    ? trades.filter(t => t.exit_datetime?.startsWith(selectedDate))
+  const selectedDayTrades = selectedDate
+    ? trades.filter(t => closedDayKey(t) === selectedDate)
     : [];
 
   // Yearly heatmap data

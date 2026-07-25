@@ -13,6 +13,7 @@ import {
   Legend,
   ReferenceLine
 } from 'recharts';
+import { closedDayKey, closedTrades } from '@/lib/tradeStatus';
 
 interface WinLosingDaysPriceVolumeSectionProps {
   trades: Trade[];
@@ -35,11 +36,11 @@ const tooltipStyle = {
 
 // Group trades by day type (winning/losing)
 function groupTradesByDayType(trades: Trade[]) {
-  const closedTrades = trades.filter(t => t.exit_datetime !== null && t.exit_price !== null);
+  const closed = closedTrades(trades);
   
   const dailyData = new Map<string, { pnl: number; trades: Trade[] }>();
-  closedTrades.forEach(trade => {
-    const date = trade.exit_datetime!.split('T')[0];
+  closed.forEach(trade => {
+    const date = closedDayKey(trade)!;
     const metrics = calculateTradeMetrics(trade);
     const existing = dailyData.get(date);
     if (existing) {

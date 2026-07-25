@@ -94,8 +94,14 @@ export function aggregateFromExecutions(executions: TradeExecution[], side: Trad
     entry_price: s.avgEntry,
     exit_price: s.avgExit,
     entry_datetime: s.firstOpenAt,
-    exit_datetime: s.fullyClosed ? s.lastCloseAt : null,
+    // Any closed portion has a close time. Reporting `exit_price` while leaving
+    // `exit_datetime` null — the old behaviour for a partially closed trade —
+    // fed `new Date(null)` (NaN) into every date sort, silently corrupting the
+    // equity curve order, max drawdown and the streaks.
+    exit_datetime: s.closedQty > 0 ? s.lastCloseAt : null,
     net_pnl: s.closedQty > 0 ? s.realizedPnL : null,
+    open_quantity: s.remainingQty,
+    fully_closed: s.fullyClosed,
     summary: s,
   };
 }

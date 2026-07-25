@@ -339,7 +339,7 @@ export default function Import() {
         const side = (rawSide === 'S' || rawSide.includes('SHORT') || rawSide.includes('SELL')) ? 'SHORT' : 'LONG';
         
         const entryDatetime = row[entryDateIdx] ? new Date(row[entryDateIdx]).toISOString() : new Date().toISOString();
-        const exitDatetime = exitDateIdx >= 0 && row[exitDateIdx] ? new Date(row[exitDateIdx]).toISOString() : null;
+        const rawExitDatetime = exitDateIdx >= 0 && row[exitDateIdx] ? new Date(row[exitDateIdx]).toISOString() : null;
         
         const entryPrice = parseFloat(row[entryPriceIdx]?.replace(/[$,]/g, '') || '0');
         let exitPrice = exitPriceIdx >= 0 && row[exitPriceIdx] ? parseFloat(row[exitPriceIdx]?.replace(/[$,]/g, '') || '0') : null;
@@ -375,7 +375,17 @@ export default function Import() {
           exitPrice = calculatedExitPrice;
         }
 
-        const stableHash = generateStableHash(symbol, side, entryDatetime, exitDatetime, entryPrice, exitPrice, quantity, null);
+        // A row that reports a result but no close time (some TraderVue exports)
+        // would stay "open" forever and drop out of every closed-trade view.
+        // Bucket it on its entry day, which is what `closedAt` would infer anyway.
+        const exitDatetime =
+          rawExitDatetime === null && (exitPrice !== null || grossPnl !== null || netPnl !== null)
+            ? entryDatetime
+            : rawExitDatetime;
+
+        // Hashed from the row as it arrived, so trades imported before this
+        // fallback existed still match and don't re-import as duplicates.
+        const stableHash = generateStableHash(symbol, side, entryDatetime, rawExitDatetime, entryPrice, exitPrice, quantity, null);
 
         trades.push({
           symbol,

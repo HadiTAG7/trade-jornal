@@ -53,6 +53,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { useTradeFilters } from '@/hooks/useTradeFilters';
 import { Trade, Strategy, Account } from '@/types/trade';
 import { calculateTradeMetrics, formatCurrency, formatR } from '@/lib/calculations';
+import { isFullyClosed, openQuantity } from '@/lib/tradeStatus';
 import { format, differenceInMinutes, differenceInHours, differenceInDays } from 'date-fns';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
@@ -456,7 +457,9 @@ export default function Trades() {
                                 <span
                                   className="rounded bg-muted px-1 text-[10px] text-muted-foreground"
                                   title={`${trade.executions.length} fills${
-                                    trade.exit_datetime ? '' : ' · partially open'
+                                    isFullyClosed(trade)
+                                      ? ''
+                                      : ` · ${openQuantity(trade).toLocaleString()} still open`
                                   }`}
                                 >
                                   {trade.executions.length}f

@@ -15,6 +15,7 @@ import {
   ReferenceLine
 } from 'recharts';
 import { format, getDay, getMonth, getHours } from 'date-fns';
+import { closedDayKey, closedTrades, holdMinutes } from '@/lib/tradeStatus';
 
 interface WinLosingDaysTimesSectionProps {
   trades: Trade[];
@@ -37,12 +38,12 @@ const tooltipStyle = {
 
 // Group trades by day type (winning/losing)
 function groupTradesByDayType(trades: Trade[]) {
-  const closedTrades = trades.filter(t => t.exit_datetime !== null && t.exit_price !== null);
+  const closed = closedTrades(trades);
   
   // Group trades by day
   const dailyData = new Map<string, { pnl: number; trades: Trade[] }>();
-  closedTrades.forEach(trade => {
-    const date = trade.exit_datetime!.split('T')[0];
+  closed.forEach(trade => {
+    const date = closedDayKey(trade)!;
     const metrics = calculateTradeMetrics(trade);
     const existing = dailyData.get(date);
     if (existing) {
@@ -175,19 +176,13 @@ function calculateDurationData(winningDayTrades: Trade[], losingDayTrades: Trade
     losingPnL: 0,
   }));
 
-  const getHoldTimeMinutes = (trade: Trade): number => {
-    const entry = new Date(trade.entry_datetime);
-    const exit = new Date(trade.exit_datetime!);
-    return (exit.getTime() - entry.getTime()) / (1000 * 60);
-  };
-
   const findBucketIndex = (minutes: number): number => {
     return buckets.findIndex(b => minutes >= b.min && minutes < b.max);
   };
 
   winningDayTrades.forEach(trade => {
-    if (!trade.exit_datetime) return;
-    const minutes = getHoldTimeMinutes(trade);
+    const minutes = holdMinutes(trade);
+    if (minutes === null) return;
     const bucketIndex = findBucketIndex(minutes);
     if (bucketIndex !== -1) {
       const metrics = calculateTradeMetrics(trade);
@@ -197,8 +192,8 @@ function calculateDurationData(winningDayTrades: Trade[], losingDayTrades: Trade
   });
 
   losingDayTrades.forEach(trade => {
-    if (!trade.exit_datetime) return;
-    const minutes = getHoldTimeMinutes(trade);
+    const minutes = holdMinutes(trade);
+    if (minutes === null) return;
     const bucketIndex = findBucketIndex(minutes);
     if (bucketIndex !== -1) {
       const metrics = calculateTradeMetrics(trade);

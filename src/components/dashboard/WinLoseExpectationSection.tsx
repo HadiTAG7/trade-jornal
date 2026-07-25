@@ -17,14 +17,15 @@ import {
   Legend,
 } from 'recharts';
 import { format } from 'date-fns';
+import { closedAt, sortedClosedTrades } from '@/lib/tradeStatus';
 
 interface WinLoseExpectationSectionProps {
   trades: Trade[];
 }
 
 export function WinLoseExpectationSection({ trades }: WinLoseExpectationSectionProps) {
-  // Get closed trades only
-  const closedTrades = trades.filter(t => t.exit_datetime !== null);
+  // Closed trades, in the order they were realized (the curves below are cumulative).
+  const closedTrades = sortedClosedTrades(trades);
 
   // Calculate win/loss stats
   const winLossStats = (() => {
@@ -89,16 +90,12 @@ export function WinLoseExpectationSection({ trades }: WinLoseExpectationSectionP
   const cumulativePnLData = (() => {
     if (closedTrades.length === 0) return [];
 
-    const sorted = [...closedTrades].sort(
-      (a, b) => new Date(a.exit_datetime!).getTime() - new Date(b.exit_datetime!).getTime()
-    );
-
     let cumulative = 0;
-    return sorted.map(trade => {
+    return closedTrades.map(trade => {
       const metrics = calculateTradeMetrics(trade);
       cumulative += metrics.grossPnL;
       return {
-        date: trade.exit_datetime!,
+        date: closedAt(trade)!,
         cumulative,
         pnl: metrics.grossPnL,
       };
@@ -109,21 +106,17 @@ export function WinLoseExpectationSection({ trades }: WinLoseExpectationSectionP
   const cumulativeDrawdownData = (() => {
     if (closedTrades.length === 0) return [];
 
-    const sorted = [...closedTrades].sort(
-      (a, b) => new Date(a.exit_datetime!).getTime() - new Date(b.exit_datetime!).getTime()
-    );
-
     let equity = 0;
     let peak = 0;
     
-    return sorted.map(trade => {
+    return closedTrades.map(trade => {
       const metrics = calculateTradeMetrics(trade);
       equity += metrics.grossPnL;
       peak = Math.max(peak, equity);
       const drawdown = equity - peak; // Will be 0 or negative
       
       return {
-        date: trade.exit_datetime!,
+        date: closedAt(trade)!,
         drawdown,
         equity,
         peak,

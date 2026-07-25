@@ -39,6 +39,17 @@ export interface Trade {
   // Individual fills. When present, quantity / entry_price / exit_price and
   // P&L are derived from these (average-cost accounting).
   executions?: TradeExecution[] | null;
+  // Quantity still open, and whether nothing is left open. Derived from
+  // `executions` when the trade is saved, so the trades table can flag a
+  // partially closed position without recomputing the fills.
+  open_quantity?: number | null;
+  fully_closed?: boolean | null;
+  // Set by the broker sync when the feed gives no open time and the close time
+  // is substituted, which would otherwise report a zero hold time.
+  entry_time_estimated?: boolean | null;
+  // R multiple as the broker reported it (kept separate from the user's own
+  // `planned_r_override` so a sync never overwrites a manual value).
+  broker_r_multiple?: number | null;
   mae: number | null;
   mfe: number | null;
   notes: string | null;
