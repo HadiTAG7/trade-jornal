@@ -114,21 +114,63 @@ export function strategyForSource(source) {
   return null;
 }
 
+/**
+ * Planned risk seeded onto the strategies this sync creates.
+ *
+ * The broker sends a stop per trade, and |entry - stop| x quantity implied a
+ * different risk on every one ($299, $60, $58...), so R multiples were not
+ * comparable between trades of the same strategy. A strategy risks a fixed
+ * amount per trade; the owner can change these in Settings afterwards and the
+ * sync will not overwrite them.
+ */
+const DEFAULT_STRATEGY_RISK = { bot: 100, 'day trade': 300 };
+
 // Look up the user's strategies by name (case-insensitive), creating any that
-// are missing, and return a name -> id map.
+// are missing, and return maps of name -> id and name -> default risk.
 async function ensureStrategies(projectId, uid, token, names) {
   const base = `${FIRESTORE}/projects/${projectId}/databases/(default)/documents/users/${uid}/strategies`;
   const r = await fetch(base, { headers: { Authorization: `Bearer ${token}` } });
   const existing = r.ok ? (await r.json()).documents || [] : [];
   const map = new Map();
+  const risk = new Map();
   for (const doc of existing) {
     const name = doc.fields && doc.fields.name && doc.fields.name.stringValue;
-    if (name) map.set(name.toLowerCase(), doc.name.split('/').pop());
+    if (!name) continue;
+    const key = name.toLowerCase();
+    const docId = doc.name.split('/').pop();
+    map.set(key, docId);
+
+    const stored = doc.fields.default_risk;
+    if (stored === undefined) {
+      // The field predates this feature. Seed it onto the document so Settings
+      // shows the same number the sync is about to use — otherwise the risk would
+      // be applied invisibly, with the input sitting empty.
+      const seeded = DEFAULT_STRATEGY_RISK[key] ?? null;
+      risk.set(key, seeded);
+      if (seeded !== null) {
+        await fetch(
+          `${base}/${docId}?updateMask.fieldPaths=default_risk`,
+          {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+            body: JSON.stringify({ fields: { default_risk: { doubleValue: seeded } } }),
+          },
+        ).catch(() => {});
+      }
+      continue;
+    }
+
+    // An explicit null means the owner cleared it: fall back to the broker stop
+    // rather than re-seeding a value they deliberately removed.
+    const value = 'doubleValue' in stored ? Number(stored.doubleValue)
+      : 'integerValue' in stored ? Number(stored.integerValue) : null;
+    risk.set(key, value !== null && Number.isFinite(value) ? value : null);
   }
 
   const nowIso = new Date().toISOString();
   for (const name of names) {
     if (map.has(name.toLowerCase())) continue;
+    const seeded = DEFAULT_STRATEGY_RISK[name.toLowerCase()] ?? null;
     const create = await fetch(base, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
@@ -138,6 +180,9 @@ async function ensureStrategies(projectId, uid, token, names) {
           name: { stringValue: name },
           description: { stringValue: 'Created automatically by broker sync' },
           color: { stringValue: name === 'bot' ? '#6366f1' : '#0ea5e9' },
+          default_risk: seeded === null
+            ? { nullValue: null }
+            : { doubleValue: seeded },
           created_at: { stringValue: nowIso },
         },
       }),
@@ -145,9 +190,10 @@ async function ensureStrategies(projectId, uid, token, names) {
     if (create.ok) {
       const doc = await create.json();
       map.set(name.toLowerCase(), doc.name.split('/').pop());
+      risk.set(name.toLowerCase(), seeded);
     }
   }
-  return map;
+  return { ids: map, risk };
 }
 
 // Fields the sync owns and refreshes on every run. Everything the user can
@@ -188,13 +234,22 @@ export function brokerFields(row, uid, nowIso) {
 }
 
 // Written only when the document is first created, so later user edits stick.
-export function firstWriteFields(row, nowIso) {
-  return {
+//
+// `plannedRisk` is the strategy's fixed risk per trade. It goes in here rather
+// than in `brokerFields` deliberately: `planned_risk_override` is the owner's
+// field, so seeding it on creation gives every synced trade a comparable R while
+// leaving them free to change it on any individual trade afterwards.
+export function firstWriteFields(row, nowIso, plannedRisk) {
+  const fields = {
     notes: { stringValue: `Imported from broker${row.source ? ` (${row.source})` : ''}` },
     fees: { doubleValue: 0 },
     commissions: { doubleValue: 0 },
     created_at: { stringValue: nowIso },
   };
+  if (plannedRisk !== null && plannedRisk !== undefined && Number.isFinite(plannedRisk)) {
+    fields.planned_risk_override = { doubleValue: plannedRisk };
+  }
+  return fields;
 }
 
 // Stable hash of the broker-side values: identical fingerprint => nothing to
@@ -534,9 +589,12 @@ export default async function handler(req, res) {
       if (name) wanted.add(name);
     }
     let strategyIds = new Map();
+    let strategyRisk = new Map();
     if (wanted.size) {
       try {
-        strategyIds = await ensureStrategies(projectId, uid, token, [...wanted]);
+        const resolved = await ensureStrategies(projectId, uid, token, [...wanted]);
+        strategyIds = resolved.ids;
+        strategyRisk = resolved.risk;
       } catch (err) {
         warnings.push(`strategy tagging skipped: ${err.message}`);
       }
@@ -570,7 +628,8 @@ export default async function handler(req, res) {
 
       if (!prior) {
         // First write: broker fields + the create-only defaults.
-        Object.assign(fields, firstWriteFields(row, nowIso));
+        const risk = mappedName ? strategyRisk.get(mappedName.toLowerCase()) ?? null : null;
+        Object.assign(fields, firstWriteFields(row, nowIso, risk));
         if (mappedId) fields.strategy_id = { stringValue: mappedId };
         await writeTradeFields(projectId, uid, token, docId, fields, { create: true })
           .catch(async (err) => {

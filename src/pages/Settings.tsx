@@ -12,6 +12,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { Account, Strategy, Tag, Mistake } from '@/types/trade';
 import { exportAllData, downloadAsJson } from '@/lib/exportData';
 import { SyncStatusCard } from '@/components/settings/SyncStatusCard';
+import { StrategyRisk } from '@/components/settings/StrategyRisk';
 import { loadList } from '@/lib/safeLoad';
 
 export default function Settings() {
@@ -293,6 +294,10 @@ export default function Settings() {
                     <p className="text-muted-foreground text-sm">No strategies yet. Add your first strategy above.</p>
                   )}
                 </div>
+
+                {user && (
+                  <StrategyRisk uid={user.id} strategies={strategies} onSaved={fetchStrategies} />
+                )}
               </CardContent>
             </Card>
           </TabsContent>
