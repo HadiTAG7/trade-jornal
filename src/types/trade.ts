@@ -85,6 +85,13 @@ export interface Strategy {
   name: string;
   description: string | null;
   color: string;
+  /**
+   * Planned risk in account currency for one trade of this strategy. Applied to
+   * broker-synced trades, which arrive with a broker stop that implies a
+   * different risk on every trade — so R was not comparable between them.
+   * Null means "work it out from the stop", the original behaviour.
+   */
+  default_risk?: number | null;
   created_at: string;
 }
 
